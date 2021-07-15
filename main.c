@@ -54,7 +54,8 @@ typedef struct Player {
 
 typedef struct Ring {
 	Vector2 position;
-	Color color;
+	int player_index;
+	float angle;
 	float t;
 } Ring;
 
@@ -71,6 +72,7 @@ typedef struct Game_State {
 	Ring_Pool ring_pool;
 	Sound sound_win;
 	int triumphant_player;
+	float title_alpha;
 } Game_State;
 
 float sign_float(float v) {
@@ -161,13 +163,17 @@ void spawn_bullets(Player *player) {
 }
 
 
-void spawn_ring(Ring_Pool *ring_pool, Vector2 position, Color color) {
+void spawn_ring(Game_State *game_state, Vector2 position, int player_index, float ring_angle) {
 	
+	Ring_Pool *ring_pool = &game_state->ring_pool;
+
 	if (ring_pool->active_rings < MAX_ACTIVE_RINGS) {
 
 		ring_pool->rings[ring_pool->active_rings++] = (Ring){
 			.position = position,
-			.color = color,
+			.player_index = player_index,
+			.t = 0.0f,
+			.angle = ring_angle,
 		};
 
 	}
@@ -314,6 +320,10 @@ void draw_text_shadowed(Font font, const char *text, Vector2 position, float fon
 void reset_game(Game_State *game_state) {
 	game_state->triumphant_player = -1;
 
+	game_state->title_alpha = 1.0f;
+
+	game_state->ring_pool.active_rings = 0;
+
 	game_state->players[0] = (Player){
 		.position = { GetScreenWidth() * 2.0f/3.0f, GetScreenHeight() / 2.0f },
 		.velocity = { 0.0f, 0.0f },
@@ -390,9 +400,11 @@ int main(void)
 
 	game_state->sound_win = LoadSound("resources/win.wav");
 
+	const char *title = "Juelsminde Jaust";
+
 	// Set configuration flags for window creation
 	SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
-	InitWindow(VIEW_WIDTH, VIEW_HEIGHT, "raylib [core] example - window flags");
+	InitWindow(VIEW_WIDTH, VIEW_HEIGHT, title);
 	ToggleFullscreen();
 	HideCursor();
 
@@ -417,12 +429,18 @@ int main(void)
 	while (!WindowShouldClose())    // Detect window close button or ESC key
 	{
 		float dt = GetFrameTime();
+		double current_time = GetTime();
 
 		// Update
 		//-----------------------------------------------------
 
-		if (IsKeyPressed(KEY_ENTER) && (IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT))) {
-			ToggleFullscreen();  // modifies window size when scaling!
+		if (IsKeyPressed(KEY_ENTER)) {
+			if (IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT)) {
+				ToggleFullscreen();  // modifies window size when scaling!
+			}
+			else {
+				reset_game(game_state);
+			}
 		}
 
 		if (game_state->triumphant_player < 0) {
@@ -438,47 +456,115 @@ int main(void)
 
 				player_update(player, dt);
 
+				if (game_state->title_alpha > 0) {
+					game_state->title_alpha -= Vector2LengthSqr(player->velocity)*0.000001f;
+				}
+
 				for (int bullet_index = 0; bullet_index < player->active_bullets; ++bullet_index) {
 
 					Bullet *bullet = &player->bullets[bullet_index];
 
-					bullet->position = Vector2Add(bullet->position, Vector2Scale(bullet->velocity, dt));
+					Vector2 bullet_position = bullet->position;
 
-					bool bullet_overlaps_opponent = CheckCollisionCircles(bullet->position, BULLET_RADIUS, opponent->position, opponent_radius);
+					bullet->position = Vector2Add(bullet_position, Vector2Scale(bullet->velocity, dt));
 
-					if (bullet_overlaps_opponent || position_outside_playzone(bullet->position)) {
+					bool bullet_overlaps_opponent = CheckCollisionCircles(bullet_position, BULLET_RADIUS, opponent->position, opponent_radius);
+
+					if (bullet_overlaps_opponent || position_outside_playzone(bullet_position)) {
 						player->bullets[bullet_index--] = player->bullets[--player->active_bullets];
+
 
 						if (bullet_overlaps_opponent) {
 							--opponent->health;
+							
+							Vector2 hit_direction = Vector2NormalizeOrZero(Vector2Subtract(bullet_position, opponent->position));
+
+							float ring_angle = (180+90)-Vector2Angle(bullet_position, opponent->position);
+
+							PlaySound(opponent->parameters->sound_hit);
+							spawn_ring(game_state, bullet_position, player_index, ring_angle);
 
 							if (opponent->health == 0) {
 								game_state->triumphant_player = player_index;
 								PlaySound(game_state->sound_win);
 							}
 							else {
-								PlaySound(opponent->parameters->sound_hit);
 							}
 						}
 					}
 				}
 			}
-		}
-		
-		{
-			if (IsKeyDown(KEY_ENTER)) {
-				reset_game(game_state);
+
+			// Update Rings
+			for (int ring_index = 0; ring_index < game_state->ring_pool.active_rings; ++ring_index) {
+				
+				Ring *ring = &game_state->ring_pool.rings[ring_index];
+
+				ring->t += dt * 2.5f;
+
+				if (ring->t > 1.0f) {
+					game_state->ring_pool.rings[ring_index--] = game_state->ring_pool.rings[--game_state->ring_pool.active_rings];
+				}
 			}
 		}
-
-
+		
+		
+		//
+		//-----------------------------------------------------
 		// Draw
 		//-----------------------------------------------------
+		//
+
 		BeginDrawing();
 		BeginMode2D(camera);
 
 
 		ClearBackground((Color){255, 255, 255, 255});
+
+		// Draw Title
+		if (game_state->title_alpha > 0) {
+
+			Color title_color = (Color){192, 192, 192, game_state->title_alpha*255.0f};
+
+			float font_size = 100.0f;
+			float font_spacing = 0.15f*font_size;
+
+			Vector2 text_bounds = MeasureTextEx(default_font, title, font_size, font_spacing);
+			Vector2 text_position = Vector2Add((Vector2){GetScreenWidth()/2.0f, GetScreenHeight()/3.0f}, Vector2Scale(text_bounds, -0.5f));
+
+			DrawTextEx(default_font, title, text_position, font_size, font_spacing, title_color);
+
+			font_size *= 0.5f;
+			font_spacing *= 0.5f;
+
+			const char *author = "By Jakob Kjær-Kammersgaard";
+			text_bounds = MeasureTextEx(default_font, author, font_size, font_spacing);
+			text_position = Vector2Add((Vector2){GetScreenWidth()/2.0f, GetScreenHeight()* 2.0f/3.0f}, Vector2Scale(text_bounds, -0.5f));
+
+			DrawTextEx(default_font, author, text_position, font_size, font_spacing, title_color);
+		}
+
+
+		// Draw rings
+		for (int ring_index = 0; ring_index < game_state->ring_pool.active_rings; ++ring_index) {
+			
+			Ring ring = game_state->ring_pool.rings[ring_index];
+
+			Color ring_color = game_state->player_parameters[ring.player_index].color;
+
+			float t1 = 1.0f - ring.t;
+			float t2 = ring.t;
+			t1 = 1.0f - t1*t1*t1;
+
+
+			float outer_radius = t1*100.0f;
+			float inner_radius = t2*100.0f;
+
+			float start_angle = ring.angle - 60.0;
+			float end_angle = ring.angle + 60.0f;
+
+			DrawRing(ring.position, inner_radius, outer_radius, start_angle, end_angle, 10, ring_color);
+		}
 
 		//
 		// Draw players
@@ -522,8 +608,6 @@ int main(void)
 				float player_speed = Vector2Length(player->velocity);
 
 				float max_speed_while_drawing_control_text = 4000.0f*dt;
-
-				double current_time = GetTime();
 
 				if (player_speed <= max_speed_while_drawing_control_text) {
 
@@ -605,6 +689,21 @@ int main(void)
 
 
 		}
+
+#if 0
+		Vector2 a = {300, 300};
+		Vector2 b = Vector2Add(a, Vector2Scale((Vector2){cosf(current_time), sinf(current_time)}, 100.0f));
+
+		DrawCircleV(a, 10, RED);
+		DrawCircleV(b, 10, GREEN);
+
+		if (IsKeyPressed(KEY_ONE)) {
+
+			float angle = (360+90)-Vector2Angle(b, a);
+
+			spawn_ring(game_state, b, 1, angle);
+		}
+#endif
 
 		// DrawFPS(GetScreenWidth()-100, 10);
 #if 0
