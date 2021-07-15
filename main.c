@@ -46,6 +46,7 @@ typedef struct Player {
 	int health;
 	float energy;
 	double controls_text_timeout;
+	float hit_animation_t;
 #define MAX_ACTIVE_BULLETS 2048
 	int active_bullets;
 	Bullet bullets[MAX_ACTIVE_BULLETS];
@@ -232,10 +233,10 @@ void player_update(Player *player, float dt) {
 	float player_radius = radius_from_energy(player->energy);
 
 	if (player->velocity.x > 0) {
-		float difference = VIEW_WIDTH - (to_position.x + player_radius);
+		float difference = GetScreenWidth() - (to_position.x + player_radius);
 
 		if (difference < 0) {
-			to_position.x = VIEW_WIDTH - player_radius;
+			to_position.x = GetScreenWidth() - player_radius;
 			
 			if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullets(player);
 
@@ -256,10 +257,10 @@ void player_update(Player *player, float dt) {
 	}
 
 	if (player->velocity.y > 0) {
-		float difference = VIEW_HEIGHT - (to_position.y + player_radius);
+		float difference = GetScreenHeight() - (to_position.y + player_radius);
 
 		if (difference < 0) {
-			to_position.y = VIEW_HEIGHT - player_radius;
+			to_position.y = GetScreenHeight() - player_radius;
 			
 			if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullets(player);
 
@@ -284,6 +285,10 @@ void player_update(Player *player, float dt) {
 	float speed = Vector2Length(player->velocity);
 
 	player->energy += speed * dt / (player->energy*1.0f + 1.0f);
+
+	if (player->hit_animation_t < 1.0f) {
+		player->hit_animation_t += dt*4.0f;
+	}
 
 }
 
@@ -329,7 +334,8 @@ void reset_game(Game_State *game_state) {
 		.velocity = { 0.0f, 0.0f },
 		.health = 30,
 		.energy = 0.0f,
-		.controls_text_timeout = 0,
+		.controls_text_timeout = 0.0,
+		.hit_animation_t = 1.0f,
 		.active_bullets = 0,
 		.bullets = {0},
 		.parameters = &game_state->player_parameters[0],
@@ -340,6 +346,7 @@ void reset_game(Game_State *game_state) {
 		.health = 30,
 		.energy = 0.0f,
 		.controls_text_timeout = 0,
+		.hit_animation_t = 1.0f,
 		.active_bullets = 0,
 		.bullets = {0},
 		.parameters = &game_state->player_parameters[1],
@@ -381,7 +388,7 @@ int main(void)
 		.key_up = KEY_UP,
 		.key_down = KEY_DOWN,
 		.sound_pop = LoadSound("resources/pop.wav"),
-		.sound_hit = LoadSound("resources/hit.wav"),
+		.sound_hit = LoadSound("resources/hit3.wav"),
 		.acceleration_force = 800.0f, 
 		.friction = 0.5f,
 		.color = (Color){240, 120, 0, 255},
@@ -392,7 +399,7 @@ int main(void)
 		.key_up = KEY_W,
 		.key_down = KEY_S,
 		.sound_pop = LoadSound("resources/pop2.wav"),
-		.sound_hit = LoadSound("resources/hit2.wav"),
+		.sound_hit = LoadSound("resources/hit4.wav"),
 		.acceleration_force = 800.0f, 
 		.friction = 0.5f,
 		.color = (Color){0, 120, 240, 255},
@@ -422,7 +429,7 @@ int main(void)
 	Font default_font = GetFontDefault();
 
 
-	//SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
+	SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
 	//----------------------------------------------------------
 
 	// Main game loop
@@ -483,6 +490,8 @@ int main(void)
 
 							PlaySound(opponent->parameters->sound_hit);
 							spawn_ring(game_state, bullet_position, player_index, ring_angle);
+
+							opponent->hit_animation_t = 0.0f;
 
 							if (opponent->health == 0) {
 								game_state->triumphant_player = player_index;
@@ -595,6 +604,13 @@ int main(void)
 			{
 				const char *health_text_string = TextFormat("%i", player->health);
 
+				float t = player->hit_animation_t;
+				if (t < 1.0f) {
+					float font_size_factor = 1 + 0.5f * sinf(PI*player->hit_animation_t);
+					font_size *= font_size_factor;
+					font_spacing = font_size*0.15f;
+				}
+
 
 				Vector2 health_text_bounds = MeasureTextEx(default_font, health_text_string, font_size, font_spacing);
 
@@ -646,7 +662,10 @@ int main(void)
 
 			DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), (Color){255, 255, 255, 128});
 
-			DrawRectangle(0, GetScreenHeight() * 2.0f/6.0f, GetScreenWidth(), GetScreenHeight() * 2.0f/6.0f, player_parameters[triumphant_player].color);
+			Color win_box_color = player_parameters[triumphant_player].color;
+			win_box_color.a = 192;
+
+			DrawRectangle(0, GetScreenHeight() * 2.0f/6.0f, GetScreenWidth(), GetScreenHeight() * 2.0f/6.0f, win_box_color);
 
 			const char *win_text = (const char *[]){
 				"Orange Player Wins",
