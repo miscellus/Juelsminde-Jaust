@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+set -e
+
+game_name=Juels_Duel
+
+cc main.c -O3 -Wall -Wextra -pedantic -framework IOKit -framework Cocoa -framework OpenGL -I/usr/local/Cellar/raylib/3.7.0/include -L/usr/local/Cellar/raylib/3.7.0/lib -lraylib -o $game_name
+
+./$game_name
