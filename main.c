@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <time.h>
-#include "entities.c"
 
 // #define ASPECT_RATIO (16.0f/10.0f)
 // #define VIEW_WIDTH 1440
