@@ -12,18 +12,30 @@
 
 #define BULLET_DEFAULT_SPEED 100.0f
 #define BULLET_ENERGY_COST 3.0f
-#define BULLET_RADIUS 18.0f
+#define BULLET_RADIUS 15.0f
+#define BULLET_TIME_END_FADE 7.0f
+#define BULLET_TIME_BEGIN_FADE (BULLET_TIME_END_FADE-0.4f)
 
 #define PLAYER_MINIMUM_RADIUS 30.0f   
+
+#define FONT_SPACING_FOR_SIZE 0.15f
 
 
 #define MINIMUM(a, b) ((a) < (b) ? (a) : (b))
 #define MAXIMUM(a, b) ((a) > (b) ? (a) : (b))
 	
 
+typedef struct View {
+	float width;
+	float height;
+	float scale;
+	float inv_scale;
+} View;
+
 typedef struct Bullet {
 	Vector2 position;
 	Vector2 velocity;
+	float time;
 } Bullet;
 
 #define NUM_PLAYERS 2
@@ -69,6 +81,7 @@ typedef struct Ring_Pool {
 } Ring_Pool;
 
 typedef struct Game_State {
+	View view;
 	Player players[NUM_PLAYERS];
 	Player_Parameters player_parameters[NUM_PLAYERS];
 	Ring_Pool ring_pool;
@@ -154,7 +167,7 @@ float random_01() {
 void spawn_bullets(Player *player) {
 
 	int count = player_compute_max_bullets(player);
-	float speed = 400;
+	float speed = Vector2LengthSqr(player->velocity)/1565;
 
 	if (player->active_bullets + count > MAX_ACTIVE_BULLETS) {
 		count = MAX_ACTIVE_BULLETS - player->active_bullets;
@@ -174,6 +187,7 @@ void spawn_bullets(Player *player) {
 		Bullet *bullet = &player->bullets[player->active_bullets + i];
 		bullet->position = player->position;
 		bullet->velocity = Vector2Scale((Vector2){cosf(angle), sinf(angle)}, speed);
+		bullet->time = 0;
 		angle += angle_quantum;
 	}
 
@@ -200,12 +214,12 @@ void spawn_ring(Game_State *game_state, Vector2 position, int player_index, floa
 
 }
 
-bool position_outside_playzone(Vector2 position) {
+bool position_outside_playzone(Vector2 position, View view) {
 	return (
 		position.x < -100 ||
-		position.x >= GetScreenWidth() + 100 ||
+		position.x >= view.width + 100 ||
 		position.y < -100 ||
-		position.y >= GetScreenHeight() + 100
+		position.y >= view.height + 100
 	);
 }
 
@@ -237,24 +251,18 @@ void reset_game(Game_State *game_state) {
 
 	game_state->ring_pool.active_rings = 0;
 
+	const int player_start_health = 30;
+
 	game_state->players[0] = (Player){
-		.position = { GetScreenWidth() * 2.0f/3.0f, GetScreenHeight() / 2.0f },
-		.velocity = { 0.0f, 0.0f },
-		.health = 30,
-		.energy = 0.0f,
-		.controls_text_timeout = 0.0,
+		.position = { game_state->view.width * 2.0f/3.0f, game_state->view.height / 2.0f },
+		.health = player_start_health,
 		.hit_animation_t = 1.0f,
-		.active_bullets = 0,
 		.parameters = &game_state->player_parameters[0],
 	};
 	game_state->players[1] = (Player){
-		.position = { GetScreenWidth() * 1.0f/3.0f, GetScreenHeight() / 2.0f },
-		.velocity = { 0.0f, 0.0f },
-		.health = 30,
-		.energy = 0.0f,
-		.controls_text_timeout = 0,
+		.position = { game_state->view.width * 1.0f/3.0f, game_state->view.height / 2.0f },
+		.health = player_start_health,
 		.hit_animation_t = 1.0f,
-		.active_bullets = 0,
 		.parameters = &game_state->player_parameters[1],
 	};
 }
@@ -264,6 +272,20 @@ void set_window_to_monitor_dimensions(void) {
 	int monitor_width = GetMonitorWidth(monitor_index);
 	int monitor_height = GetMonitorHeight(monitor_index);
 	SetWindowSize(monitor_width, monitor_height);
+}
+
+View get_view(void) {
+
+	View result;
+
+	float screen_width = GetScreenWidth();
+	float screen_height = GetScreenHeight();
+
+	result.scale = 0.5f*(screen_width/1440.0f + screen_height/900.0f);
+	result.inv_scale = 1.0f/result.scale;
+	result.width = screen_width*result.inv_scale;
+	result.height = screen_height*result.inv_scale;
+	return result;
 }
 
 int main(void)
@@ -296,8 +318,20 @@ int main(void)
 	InitAudioDevice();
 	assert(IsAudioDeviceReady());
 
+	const char *title = "Juelsminde Jaust";
+
+	// Set configuration flags for window creation
+	SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
+	InitWindow(800, 600, title);
+
+	set_window_to_monitor_dimensions();
+	ToggleFullscreen();
+	HideCursor();
+
 	Game_State *game_state = malloc(sizeof(*game_state));
 	assert(game_state);
+
+	View view = game_state->view = get_view();
 
 	Player_Parameters *player_parameters = game_state->player_parameters;
 
@@ -324,18 +358,8 @@ int main(void)
 		.color = (Color){0, 120, 240, 255},
 	};
 
-	game_state->sound_win = LoadSound("resources/win.wav");
+	game_state->sound_win = LoadSound("resources/win2.wav");
 
-	const char *title = "Juelsminde Jaust";
-
-	// Set configuration flags for window creation
-	SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
-	InitWindow(800, 600, title);
-
-	set_window_to_monitor_dimensions();
-	
-	ToggleFullscreen();
-	HideCursor();
 
 	reset_game(game_state);
 
@@ -351,11 +375,6 @@ int main(void)
 
 	SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
 	//----------------------------------------------------------
-
-	float view_width = GetScreenWidth();
-	float view_height = GetScreenHeight();
-	
-	float SCALE = MINIMUM(view_width/1440.0f, view_height/900.0f);
 
 	// Main game loop
 	while (!WindowShouldClose())    // Detect window close button or ESC key
@@ -380,17 +399,16 @@ int main(void)
 		}
 
 		if (IsWindowResized()) {
-			view_width = GetScreenWidth();
-			view_height = GetScreenHeight();
-			SCALE = MINIMUM(view_width/1440.0f, view_height/900.0f);
+
+			view = game_state->view = get_view();
 
 			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
 
 				Player *player = game_state->players + player_index;
 
-				float radius = radius_from_energy(player->energy) * SCALE; 
+				float radius = radius_from_energy(player->energy); 
 
-				Rectangle view_rectangle = {0, 0, view_width, view_height};
+				Rectangle view_rectangle = {0, 0, view.width, view.height};
 
 				if (!CheckCollisionPointRec(player->position, view_rectangle)) {
 
@@ -400,15 +418,15 @@ int main(void)
 					if (min_corner.x < 0) {
 						player->position.x = radius;
 					}
-					else if (max_corner.x > view_width) {
-						player->position.x = view_width - radius;
+					else if (max_corner.x > view.width) {
+						player->position.x = view.width - radius;
 					}
 
 					if (min_corner.y < 0) {
 						player->position.y = radius;
 					}
-					else if (max_corner.y > view_height) {
-						player->position.y = view_height - radius;
+					else if (max_corner.y > view.height) {
+						player->position.y = view.height - radius;
 					}
 
 				}
@@ -454,16 +472,16 @@ int main(void)
 
 					Vector2 to_position = player->position = Vector2Add(
 						player->position,
-						Vector2Scale(player->velocity, dt * SCALE)
+						Vector2Scale(player->velocity, dt)
 					);
 
-					float player_radius = radius_from_energy(player->energy) * SCALE;
+					float player_radius = radius_from_energy(player->energy);
 
 					if (player->velocity.x > 0) {
-						float difference = view_width - (to_position.x + player_radius);
+						float difference = view.width - (to_position.x + player_radius);
 
 						if (difference < 0) {
-							to_position.x = view_width - player_radius;
+							to_position.x = view.width - player_radius;
 							
 							if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullets(player);
 
@@ -484,10 +502,10 @@ int main(void)
 					}
 
 					if (player->velocity.y > 0) {
-						float difference = view_height - (to_position.y + player_radius);
+						float difference = view.height - (to_position.y + player_radius);
 
 						if (difference < 0) {
-							to_position.y = view_height - player_radius;
+							to_position.y = view.height - player_radius;
 							
 							if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullets(player);
 
@@ -519,23 +537,29 @@ int main(void)
 				}
 
 				if (game_state->title_alpha > 0) {
-					game_state->title_alpha -= Vector2Length(player->velocity)*0.0001f*SCALE;
+					game_state->title_alpha -= Vector2Length(player->velocity)*0.0001f;
 				}
 
 				Player *opponent = game_state->players + (1-player_index);
-				float opponent_radius = radius_from_energy(opponent->energy) * SCALE;
+				float opponent_radius = radius_from_energy(opponent->energy);
 
 				for (int bullet_index = 0; bullet_index < player->active_bullets; ++bullet_index) {
 
 					Bullet *bullet = &player->bullets[bullet_index];
 
+					bullet->time += dt;
+					if (bullet->time > BULLET_TIME_END_FADE) {
+						player->bullets[bullet_index--] = player->bullets[--player->active_bullets];
+						continue;
+					}
+
 					Vector2 bullet_position = bullet->position;
 
-					bullet->position = Vector2Add(bullet_position, Vector2Scale(bullet->velocity, dt * SCALE));
+					bullet->position = Vector2Add(bullet_position, Vector2Scale(bullet->velocity, dt));
 
-					bool bullet_overlaps_opponent = CheckCollisionCircles(bullet_position, BULLET_RADIUS * SCALE, opponent->position, opponent_radius);
+					bool bullet_overlaps_opponent = CheckCollisionCircles(bullet_position, BULLET_RADIUS, opponent->position, opponent_radius);
 
-					if (bullet_overlaps_opponent || position_outside_playzone(bullet_position)) {
+					if (bullet_overlaps_opponent || position_outside_playzone(bullet_position, view)) {
 						player->bullets[bullet_index--] = player->bullets[--player->active_bullets];
 
 
@@ -552,8 +576,6 @@ int main(void)
 							if (opponent->health == 0) {
 								game_state->triumphant_player = player_index;
 								PlaySound(game_state->sound_win);
-							}
-							else {
 							}
 						}
 					}
@@ -587,6 +609,9 @@ int main(void)
 		BeginDrawing();
 		BeginMode2D(camera);
 
+		float screen_width = GetScreenWidth();
+		float screen_height = GetScreenHeight();
+
 
 		ClearBackground((Color){255, 255, 255, 255});
 
@@ -595,11 +620,11 @@ int main(void)
 
 			Color title_color = (Color){192, 192, 192, game_state->title_alpha*255.0f};
 
-			float font_size = 100.0f*SCALE;
+			float font_size = 100.0f*view.scale;
 			float font_spacing = 0.15f*font_size;
 
 			Vector2 text_bounds = MeasureTextEx(default_font, title, font_size, font_spacing);
-			Vector2 text_position = Vector2Add((Vector2){view_width/2.0f, view_height/3.0f}, Vector2Scale(text_bounds, -0.5f));
+			Vector2 text_position = Vector2Add((Vector2){screen_width/2.0f, screen_height/3.0f}, Vector2Scale(text_bounds, -0.5f));
 
 			DrawTextEx(default_font, title, text_position, font_size, font_spacing, title_color);
 
@@ -608,7 +633,7 @@ int main(void)
 
 			const char *author = "By Jakob Kjær-Kammersgaard";
 			text_bounds = MeasureTextEx(default_font, author, font_size, font_spacing);
-			text_position = Vector2Add((Vector2){view_width/2.0f, view_height* 2.0f/3.0f}, Vector2Scale(text_bounds, -0.5f));
+			text_position = Vector2Add((Vector2){screen_width/2.0f, screen_height* 2.0f/3.0f}, Vector2Scale(text_bounds, -0.5f));
 
 			DrawTextEx(default_font, author, text_position, font_size, font_spacing, title_color);
 		}
@@ -626,11 +651,13 @@ int main(void)
 			t1 = 1.0f - t1*t1*t1;
 
 
-			float outer_radius = t1*100.0f*SCALE;
-			float inner_radius = t2*100.0f*SCALE;
+			float outer_radius = t1*100.0f*view.scale;
+			float inner_radius = t2*100.0f*view.scale;
 
 			float start_angle = ring.angle - 60.0;
 			float end_angle = ring.angle + 60.0f;
+
+			ring.position = Vector2Scale(ring.position, view.scale);
 
 			DrawRing(ring.position, inner_radius, outer_radius, start_angle, end_angle, 10, ring_color);
 		}
@@ -649,16 +676,45 @@ int main(void)
 
 				Bullet *bullet = &player->bullets[bullet_index];
 
-				DrawCircleV(bullet->position, BULLET_RADIUS*SCALE, parameters->color);
+				float t = 1.0f;
 
+				if (bullet->time >= BULLET_TIME_BEGIN_FADE) {
+					t = (bullet->time - BULLET_TIME_BEGIN_FADE)/(BULLET_TIME_END_FADE - BULLET_TIME_BEGIN_FADE);
+					t *= t*t;
+					t = 1.0f - t;
+				}
+				float bullet_radius = BULLET_RADIUS*t*view.scale;
+
+				Vector2 bullet_screen_position = Vector2Scale(bullet->position, view.scale);
+
+				DrawCircleV(bullet_screen_position, bullet_radius, parameters->color);
+
+
+				if (1) {
+					Vector2 direction = Vector2NormalizeOrZero(bullet->velocity);
+					Vector2 front = Vector2Scale(direction, bullet_radius);
+
+					Vector2 point_tail = Vector2Subtract(bullet_screen_position, Vector2Scale(direction, bullet_radius*2));
+					Vector2 point_left = Vector2Add(bullet_screen_position, Vector2Rotate(front, 115));
+					Vector2 point_right = Vector2Add(bullet_screen_position, Vector2Rotate(front, -115));
+
+					DrawTriangle(point_tail, point_left, point_right, parameters->color);
+
+					// Cx^2 + Cy^2 = Cr^2
+					// Mx^2 + My^2 = Mr^2
+
+					// Cx^2 + Cy^2 - Mx^2 - My^2 = Cr^2 - Mr^2
+				}
 			}
 
-			float radius = radius_from_energy(player->energy)*SCALE;
-			float font_size = radius*1.0f;
-			float font_spacing = font_size*0.15f;
+			float player_radius = radius_from_energy(player->energy)*view.scale;
+			float font_size = player_radius*1.0f;
+			float font_spacing = font_size*FONT_SPACING_FOR_SIZE;
+
+			Vector2 player_screen_position = Vector2Scale(player->position, view.scale);
 
 			// Draw player's body
-			DrawCircleV(player->position, radius, parameters->color);
+			DrawCircleV(player_screen_position, player_radius, parameters->color);
 
 			// Draw player's health text
 			{
@@ -668,13 +724,13 @@ int main(void)
 				if (t < 1.0f) {
 					float font_size_factor = 1 + 0.5f * sinf(PI*player->hit_animation_t);
 					font_size *= font_size_factor;
-					font_spacing = font_size*0.15f;
+					font_spacing = font_size*FONT_SPACING_FOR_SIZE;
 				}
 
 
 				Vector2 health_text_bounds = MeasureTextEx(default_font, health_text_string, font_size, font_spacing);
 
-				Vector2 health_text_position = Vector2Add(player->position, Vector2Scale(health_text_bounds, -0.5f));
+				Vector2 health_text_position = Vector2Add(player_screen_position, Vector2Scale(health_text_bounds, -0.5f));
 
 				draw_text_shadowed(default_font, health_text_string, health_text_position, font_size, font_spacing, WHITE, BLACK);
 			}
@@ -696,14 +752,14 @@ int main(void)
 
 						const char *text = (const char *[]){"Arrow Keys", "W, A, S, D"}[player_index];
 
-						font_size = 30.0f*SCALE;
-						font_spacing = font_size*0.15f;
+						font_size = 30.0f*view.scale;
+						font_spacing = font_size*FONT_SPACING_FOR_SIZE;
 
 						Vector2 text_bounds = MeasureTextEx(default_font, text, font_size, font_spacing);
 
-						Vector2 text_position = Vector2Add(player->position, Vector2Scale(text_bounds, -0.5f));
+						Vector2 text_position = Vector2Add(player_screen_position, Vector2Scale(text_bounds, -0.5f));
 
-						text_position.y -= radius*1.5f;
+						text_position.y -= player_radius + font_size;
 
 						DrawTextEx(default_font, text, text_position, font_size, font_spacing, controls_color);
 					}
@@ -720,57 +776,55 @@ int main(void)
 
 			assert(triumphant_player < 2);
 
-			DrawRectangle(0, 0, view_width, view_height, (Color){255, 255, 255, 128});
+			DrawRectangle(0, 0, screen_width, screen_height, (Color){255, 255, 255, 128});
 
 			Color win_box_color = player_parameters[triumphant_player].color;
 			win_box_color.a = 192;
 
-			float font_size = 100*SCALE;
-			float font_spacing = font_size*0.15f;
+			Vector2 screen_center = {0.5f*screen_width, 0.5*screen_height};
 
-			DrawRectangle(0, view_height*0.5f - 1.5f*font_size, view_width, 3*font_size, win_box_color);
 
 			const char *win_text = (const char *[]){
 				"Orange Player Wins",
 				"Blue Player Wins",
 			}[triumphant_player];
 
+			const char *reset_button_text = "Press [Enter] to Reset";
 
-			Vector2 win_text_bounds = MeasureTextEx(default_font, win_text, font_size, font_spacing);
+			float win_text_font_size = 100*view.scale;
+			float win_text_font_spacing = win_text_font_size*FONT_SPACING_FOR_SIZE;
+			float reset_button_text_font_size = 30*view.scale;
+			float reset_button_text_font_spacing = reset_button_text_font_size*FONT_SPACING_FOR_SIZE;
 
-			Vector2 win_text_position = Vector2Scale(
-				Vector2Subtract(
-					(Vector2){view_width, view_height},
-					win_text_bounds
-				),
-				0.5f
-			);
+			Vector2 win_text_metrics = MeasureTextEx(default_font, win_text, win_text_font_size, win_text_font_spacing);
+			Vector2 reset_button_text_metrics = MeasureTextEx(default_font, reset_button_text, reset_button_text_font_size, reset_button_text_font_spacing);
 
-			win_text_position.y -= 60;
+			float padding = 60.0f*view.scale;
 
-			draw_text_shadowed(default_font, win_text, win_text_position, font_size, font_spacing, WHITE, BLACK);
+			float colored_background_height = (
+				padding +
+				win_text_metrics.y +
+				padding +
+				reset_button_text_metrics.y +
+				padding
+			); 
 
-			win_text = "Press [Enter] to Reset";
+			Vector2 draw_position = {0, screen_center.y - 0.5*colored_background_height};
 
-			font_size *= 0.5f;
-			font_spacing *= 0.5f;
+			// Draw colored rectangle behind win text
+			DrawRectangleV(draw_position, (Vector2){screen_width, colored_background_height}, win_box_color);
 
-			win_text_bounds = MeasureTextEx(default_font, win_text, font_size, font_spacing);
+			draw_position.x = screen_center.x - 0.5f*win_text_metrics.x;
+			draw_position.y += padding;
 
-			win_text_position = Vector2Scale(
-				Vector2Subtract(
-					(Vector2){view_width, view_height},
-					win_text_bounds
-				),
-				0.5f
-			);
+			draw_text_shadowed(default_font, win_text, draw_position, win_text_font_size, win_text_font_spacing, WHITE, BLACK);
 
-			win_text_position.y += 60*SCALE;
+			draw_position.y += win_text_metrics.y;
 
+			draw_position.x = screen_center.x - 0.5f*reset_button_text_metrics.x;
+			draw_position.y += padding;
 
-			draw_text_shadowed(default_font, win_text, win_text_position, font_size, font_spacing, WHITE, BLACK);
-
-
+			draw_text_shadowed(default_font, reset_button_text, draw_position, reset_button_text_font_size, reset_button_text_font_spacing, WHITE, BLACK);
 		}
 
 #if 0
