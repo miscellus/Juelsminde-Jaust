@@ -354,11 +354,13 @@ int main(void)
 
 	float view_width = GetScreenWidth();
 	float view_height = GetScreenHeight();
-	float SCALE = 0.5f*((view_width/1440.0f)+(view_height/900.0f));
+	
+	float SCALE = MINIMUM(view_width/1440.0f, view_height/900.0f);
 
 	// Main game loop
 	while (!WindowShouldClose())    // Detect window close button or ESC key
 	{
+
 		float dt = GetFrameTime();
 		double current_time = GetTime();
 
@@ -380,7 +382,7 @@ int main(void)
 		if (IsWindowResized()) {
 			view_width = GetScreenWidth();
 			view_height = GetScreenHeight();
-			SCALE = 0.5f*((view_width/1440.0f)+(view_height/900.0f));
+			SCALE = MINIMUM(view_width/1440.0f, view_height/900.0f);
 
 			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
 
@@ -413,7 +415,7 @@ int main(void)
 			}
 		}
 
-		if (game_state->triumphant_player < 0) {
+		if (game_state->triumphant_player < 0 && IsWindowFocused()) {
 
 			// Update players
 
@@ -790,10 +792,6 @@ int main(void)
 
 
 		EndMode2D();
-		
-		// DrawText(TextFormat("Orange Health: %i", players[0].health), 30, 30, 20, WHITE);
-		// DrawText(TextFormat("Blue Health: %i", players[1].health), 30, 60, 20, WHITE);
-		
 		EndDrawing();
 		//-----------------------------------------------------
 	}
