@@ -3,11 +3,13 @@
 #include <raylib.h>
 #include <raymath.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <time.h>
 #include "entities.c"
 
-#define ASPECT_RATIO (16.0f/10.0f)
-#define VIEW_WIDTH 1440
-#define VIEW_HEIGHT (VIEW_WIDTH/ASPECT_RATIO)
+// #define ASPECT_RATIO (16.0f/10.0f)
+// #define VIEW_WIDTH 1440
+// #define VIEW_HEIGHT (VIEW_WIDTH/ASPECT_RATIO)
 
 #define BULLET_DEFAULT_SPEED 100.0f
 #define BULLET_ENERGY_COST 3.0f
@@ -124,10 +126,30 @@ bool hit_is_hard_enough(float hit, float delta_time) {
 	return 4000.0f*delta_time <= fabs(hit);
 }
 
-float random_01() {
-	int i = GetRandomValue(0, (1<<23)-1) | (127 << 23);
 
-	float result = *(float *)&i - 1.0f;
+uint64_t xorshift64(uint64_t *state)
+{
+	uint64_t x = *state;
+	x ^= x << 13;
+	x ^= x >> 7;
+	x ^= x << 17;
+	return *state = x;
+}
+
+static uint64_t random_state = 0xccf134511117;
+
+float random_01() {
+
+	union {
+		uint32_t as_int;
+		float as_float;
+	} val;
+
+	val.as_int = (xorshift64(&random_state)&((1 << 23)-1)) | (127 << 23);
+
+	float result = val.as_float - 1.0f;
+
+	printf("%x\n", val.as_int);
 
 	return result;
 }
@@ -181,123 +203,12 @@ void spawn_ring(Game_State *game_state, Vector2 position, int player_index, floa
 
 }
 
-void player_update(Player *player, float dt) {
-	Vector2 player_direction_control = {0.0f, 0.0f};
-
-	Player_Parameters *parameters = player->parameters;
-
-	if (IsKeyDown(parameters->key_left)) player_direction_control.x = -1.0f;
-	if (IsKeyDown(parameters->key_right)) player_direction_control.x += 1.0f;
-	if (IsKeyDown(parameters->key_up)) player_direction_control.y = -1.0f;
-	if (IsKeyDown(parameters->key_down)) player_direction_control.y += 1.0f;
-
-	Vector2 velocity_sign = Vector2Sign(player->velocity);
-
-	Vector2 d = Vector2Subtract(velocity_sign, player_direction_control);
-
-	player_direction_control = Vector2NormalizeOrZero(player_direction_control);
-
-	d = Vector2Abs(d);
-
-	d = Vector2Scale(d, 5.5f);
-
-	// d = Vector2Add(d, Vector2One());
-	d = Vector2One();
-
-	Vector2 acceleration = Vector2Multiply(
-		Vector2Scale(
-			player_direction_control,
-			parameters->acceleration_force * dt
-		),
-		d
-	);
-
-	// printf("(%.2f, %.2f)\n", player_direction_control.x, player_direction_control.y);
-
-	player->velocity = Vector2Add(
-		player->velocity,
-		acceleration
-	);
-
-
-	player->velocity = Vector2Subtract(
-		player->velocity,
-		Vector2Scale(player->velocity, parameters->friction * dt)
-	);
-
-	Vector2 to_position = player->position = Vector2Add(
-		player->position,
-		Vector2Scale(player->velocity, dt)
-	);
-
-	float player_radius = radius_from_energy(player->energy);
-
-	if (player->velocity.x > 0) {
-		float difference = GetScreenWidth() - (to_position.x + player_radius);
-
-		if (difference < 0) {
-			to_position.x = GetScreenWidth() - player_radius;
-			
-			if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullets(player);
-
-			player->velocity.x = (1.0f-parameters->friction)*(-player->velocity.x + difference);	
-		}
-	}
-	
-	if (player->velocity.x < 0) {
-		float difference = 0 - (to_position.x - player_radius);
-
-		if (difference > 0) {
-			to_position.x = 0 + player_radius;
-
-			if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullets(player);
-
-			player->velocity.x = (1.0f-parameters->friction)*(-player->velocity.x + difference);
-		}
-	}
-
-	if (player->velocity.y > 0) {
-		float difference = GetScreenHeight() - (to_position.y + player_radius);
-
-		if (difference < 0) {
-			to_position.y = GetScreenHeight() - player_radius;
-			
-			if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullets(player);
-
-			player->velocity.y = (1.0f-parameters->friction)*(-player->velocity.y + difference);
-		}
-	}
-	
-	if (player->velocity.y < 0) {
-		float difference = 0 - (to_position.y - player_radius);
-
-		if (difference > 0) {
-			to_position.y = 0 + player_radius;
-			
-			if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullets(player);
-			
-			player->velocity.y = (1.0f-parameters->friction)*(-player->velocity.y + difference);
-		}
-	}
-
-	player->position = to_position;
-
-	float speed = Vector2Length(player->velocity);
-
-	player->energy += speed * dt / (player->energy*1.0f + 1.0f);
-
-	if (player->hit_animation_t < 1.0f) {
-		player->hit_animation_t += dt*4.0f;
-	}
-
-}
-
 bool position_outside_playzone(Vector2 position) {
 	return (
 		position.x < -100 ||
-		position.x >= VIEW_WIDTH + 100 ||
+		position.x >= GetScreenWidth() + 100 ||
 		position.y < -100 ||
-		position.y >= VIEW_HEIGHT + 100
+		position.y >= GetScreenHeight() + 100
 	);
 }
 
@@ -337,7 +248,6 @@ void reset_game(Game_State *game_state) {
 		.controls_text_timeout = 0.0,
 		.hit_animation_t = 1.0f,
 		.active_bullets = 0,
-		.bullets = {0},
 		.parameters = &game_state->player_parameters[0],
 	};
 	game_state->players[1] = (Player){
@@ -348,13 +258,26 @@ void reset_game(Game_State *game_state) {
 		.controls_text_timeout = 0,
 		.hit_animation_t = 1.0f,
 		.active_bullets = 0,
-		.bullets = {0},
 		.parameters = &game_state->player_parameters[1],
 	};
 }
 
+void set_window_to_monitor_dimensions(void) {
+	int monitor_index = GetCurrentMonitor();
+	int monitor_width = GetMonitorWidth(monitor_index);
+	int monitor_height = GetMonitorHeight(monitor_index);
+	SetWindowSize(monitor_width, monitor_height);
+}
+
 int main(void)
 {
+	{
+		long t = time(NULL);
+		random_state ^= t*13 ^ (t>>4);
+		for (int i = 0; i < 1000; ++i) printf("%f\n", random_01());
+
+	}
+
 	// Initialization
 	//---------------------------------------------------------
 
@@ -376,6 +299,7 @@ int main(void)
 	*/
 
 	InitAudioDevice();
+	assert(IsAudioDeviceReady());
 
 	Game_State *game_state = malloc(sizeof(*game_state));
 	assert(game_state);
@@ -411,13 +335,14 @@ int main(void)
 
 	// Set configuration flags for window creation
 	SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
-	InitWindow(VIEW_WIDTH, VIEW_HEIGHT, title);
+	InitWindow(800, 600, title);
+
+	set_window_to_monitor_dimensions();
+	
 	ToggleFullscreen();
 	HideCursor();
 
-
 	reset_game(game_state);
-
 
 	Camera2D camera = {
 		.offset = {0},
@@ -438,11 +363,19 @@ int main(void)
 		float dt = GetFrameTime();
 		double current_time = GetTime();
 
+		float view_width = GetScreenWidth();
+		float view_height = GetScreenHeight();
+		const float SCALE = 0.5f*((view_width/1440.0f)+(view_height/900.0f));
+
+
 		// Update
 		//-----------------------------------------------------
 
 		if (IsKeyPressed(KEY_ENTER)) {
 			if (IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT)) {
+				if (!IsWindowFullscreen()) {
+					set_window_to_monitor_dimensions();
+				}
 				ToggleFullscreen();  // modifies window size when scaling!
 			}
 			else {
@@ -457,15 +390,108 @@ int main(void)
 			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
 
 				Player *player = game_state->players + player_index;
-				Player *opponent = game_state->players + (1-player_index);
+				
+				// player_update(player, dt);
+				{
+					Vector2 player_direction_control = {0.0f, 0.0f};
 
-				float opponent_radius = radius_from_energy(opponent->energy);
+					Player_Parameters *parameters = player->parameters;
 
-				player_update(player, dt);
+					if (IsKeyDown(parameters->key_left)) player_direction_control.x = -1.0f;
+					if (IsKeyDown(parameters->key_right)) player_direction_control.x += 1.0f;
+					if (IsKeyDown(parameters->key_up)) player_direction_control.y = -1.0f;
+					if (IsKeyDown(parameters->key_down)) player_direction_control.y += 1.0f;
+
+					player_direction_control = Vector2NormalizeOrZero(player_direction_control);
+
+					Vector2 acceleration = Vector2Scale(
+						player_direction_control,
+						parameters->acceleration_force * dt
+					);
+
+					player->velocity = Vector2Add(
+						player->velocity,
+						acceleration
+					);
+
+
+					player->velocity = Vector2Subtract(
+						player->velocity,
+						Vector2Scale(player->velocity, parameters->friction * dt)
+					);
+
+					Vector2 to_position = player->position = Vector2Add(
+						player->position,
+						Vector2Scale(player->velocity, dt * SCALE)
+					);
+
+					float player_radius = radius_from_energy(player->energy) * SCALE;
+
+					if (player->velocity.x > 0) {
+						float difference = view_width - (to_position.x + player_radius);
+
+						if (difference < 0) {
+							to_position.x = view_width - player_radius;
+							
+							if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullets(player);
+
+							player->velocity.x = (1.0f-parameters->friction)*(-player->velocity.x + difference);	
+						}
+					}
+					
+					if (player->velocity.x < 0) {
+						float difference = 0 - (to_position.x - player_radius);
+
+						if (difference > 0) {
+							to_position.x = 0 + player_radius;
+
+							if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullets(player);
+
+							player->velocity.x = (1.0f-parameters->friction)*(-player->velocity.x + difference);
+						}
+					}
+
+					if (player->velocity.y > 0) {
+						float difference = view_height - (to_position.y + player_radius);
+
+						if (difference < 0) {
+							to_position.y = view_height - player_radius;
+							
+							if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullets(player);
+
+							player->velocity.y = (1.0f-parameters->friction)*(-player->velocity.y + difference);
+						}
+					}
+					
+					if (player->velocity.y < 0) {
+						float difference = 0 - (to_position.y - player_radius);
+
+						if (difference > 0) {
+							to_position.y = 0 + player_radius;
+							
+							if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullets(player);
+							
+							player->velocity.y = (1.0f-parameters->friction)*(-player->velocity.y + difference);
+						}
+					}
+
+					player->position = to_position;
+
+					float speed = Vector2Length(player->velocity);
+
+					player->energy += speed * dt / (player->energy*1.0f + 1.0f);
+
+					if (player->hit_animation_t < 1.0f) {
+						player->hit_animation_t += dt*4.0f;
+					}
+				}
 
 				if (game_state->title_alpha > 0) {
-					game_state->title_alpha -= Vector2LengthSqr(player->velocity)*0.000001f;
+					game_state->title_alpha -= Vector2Length(player->velocity)*0.0001f*SCALE;
 				}
+
+				Player *opponent = game_state->players + (1-player_index);
+				float opponent_radius = radius_from_energy(opponent->energy) * SCALE;
 
 				for (int bullet_index = 0; bullet_index < player->active_bullets; ++bullet_index) {
 
@@ -473,9 +499,9 @@ int main(void)
 
 					Vector2 bullet_position = bullet->position;
 
-					bullet->position = Vector2Add(bullet_position, Vector2Scale(bullet->velocity, dt));
+					bullet->position = Vector2Add(bullet_position, Vector2Scale(bullet->velocity, dt * SCALE));
 
-					bool bullet_overlaps_opponent = CheckCollisionCircles(bullet_position, BULLET_RADIUS, opponent->position, opponent_radius);
+					bool bullet_overlaps_opponent = CheckCollisionCircles(bullet_position, BULLET_RADIUS * SCALE, opponent->position, opponent_radius);
 
 					if (bullet_overlaps_opponent || position_outside_playzone(bullet_position)) {
 						player->bullets[bullet_index--] = player->bullets[--player->active_bullets];
@@ -483,8 +509,6 @@ int main(void)
 
 						if (bullet_overlaps_opponent) {
 							--opponent->health;
-							
-							Vector2 hit_direction = Vector2NormalizeOrZero(Vector2Subtract(bullet_position, opponent->position));
 
 							float ring_angle = (180+90)-Vector2Angle(bullet_position, opponent->position);
 
@@ -504,16 +528,20 @@ int main(void)
 				}
 			}
 
-			// Update Rings
-			for (int ring_index = 0; ring_index < game_state->ring_pool.active_rings; ++ring_index) {
-				
-				Ring *ring = &game_state->ring_pool.rings[ring_index];
+		}
+		
+		// Update Rings
+		for (int ring_index = 0; ring_index < game_state->ring_pool.active_rings; ) {
+			
+			Ring *ring = &game_state->ring_pool.rings[ring_index];
 
-				ring->t += dt * 2.5f;
+			ring->t += dt * 2.5f;
 
-				if (ring->t > 1.0f) {
-					game_state->ring_pool.rings[ring_index--] = game_state->ring_pool.rings[--game_state->ring_pool.active_rings];
-				}
+			if (ring->t > 1.0f) {
+				game_state->ring_pool.rings[ring_index] = game_state->ring_pool.rings[--game_state->ring_pool.active_rings];
+			}
+			else {
+				++ring_index;
 			}
 		}
 		
@@ -535,11 +563,11 @@ int main(void)
 
 			Color title_color = (Color){192, 192, 192, game_state->title_alpha*255.0f};
 
-			float font_size = 100.0f;
+			float font_size = 100.0f*SCALE;
 			float font_spacing = 0.15f*font_size;
 
 			Vector2 text_bounds = MeasureTextEx(default_font, title, font_size, font_spacing);
-			Vector2 text_position = Vector2Add((Vector2){GetScreenWidth()/2.0f, GetScreenHeight()/3.0f}, Vector2Scale(text_bounds, -0.5f));
+			Vector2 text_position = Vector2Add((Vector2){view_width/2.0f, view_height/3.0f}, Vector2Scale(text_bounds, -0.5f));
 
 			DrawTextEx(default_font, title, text_position, font_size, font_spacing, title_color);
 
@@ -548,7 +576,7 @@ int main(void)
 
 			const char *author = "By Jakob Kjær-Kammersgaard";
 			text_bounds = MeasureTextEx(default_font, author, font_size, font_spacing);
-			text_position = Vector2Add((Vector2){GetScreenWidth()/2.0f, GetScreenHeight()* 2.0f/3.0f}, Vector2Scale(text_bounds, -0.5f));
+			text_position = Vector2Add((Vector2){view_width/2.0f, view_height* 2.0f/3.0f}, Vector2Scale(text_bounds, -0.5f));
 
 			DrawTextEx(default_font, author, text_position, font_size, font_spacing, title_color);
 		}
@@ -566,8 +594,8 @@ int main(void)
 			t1 = 1.0f - t1*t1*t1;
 
 
-			float outer_radius = t1*100.0f;
-			float inner_radius = t2*100.0f;
+			float outer_radius = t1*100.0f*SCALE;
+			float inner_radius = t2*100.0f*SCALE;
 
 			float start_angle = ring.angle - 60.0;
 			float end_angle = ring.angle + 60.0f;
@@ -589,11 +617,11 @@ int main(void)
 
 				Bullet *bullet = &player->bullets[bullet_index];
 
-				DrawCircleV(bullet->position, BULLET_RADIUS, parameters->color);
+				DrawCircleV(bullet->position, BULLET_RADIUS*SCALE, parameters->color);
 
 			}
 
-			float radius = radius_from_energy(player->energy);
+			float radius = radius_from_energy(player->energy)*SCALE;
 			float font_size = radius*1.0f;
 			float font_spacing = font_size*0.15f;
 
@@ -636,7 +664,7 @@ int main(void)
 
 						const char *text = (const char *[]){"Arrow Keys", "W, A, S, D"}[player_index];
 
-						font_size = 30.0f;
+						font_size = 30.0f*SCALE;
 						font_spacing = font_size*0.15f;
 
 						Vector2 text_bounds = MeasureTextEx(default_font, text, font_size, font_spacing);
@@ -660,26 +688,27 @@ int main(void)
 
 			assert(triumphant_player < 2);
 
-			DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), (Color){255, 255, 255, 128});
+			DrawRectangle(0, 0, view_width, view_height, (Color){255, 255, 255, 128});
 
 			Color win_box_color = player_parameters[triumphant_player].color;
 			win_box_color.a = 192;
 
-			DrawRectangle(0, GetScreenHeight() * 2.0f/6.0f, GetScreenWidth(), GetScreenHeight() * 2.0f/6.0f, win_box_color);
+			float font_size = 100*SCALE;
+			float font_spacing = font_size*0.15f;
+
+			DrawRectangle(0, view_height*0.5f - 1.5f*font_size, view_width, 3*font_size, win_box_color);
 
 			const char *win_text = (const char *[]){
 				"Orange Player Wins",
 				"Blue Player Wins",
 			}[triumphant_player];
 
-			float font_size = 100;
-			float font_spacing = 10;
 
 			Vector2 win_text_bounds = MeasureTextEx(default_font, win_text, font_size, font_spacing);
 
 			Vector2 win_text_position = Vector2Scale(
 				Vector2Subtract(
-					(Vector2){GetScreenWidth(), GetScreenHeight()},
+					(Vector2){view_width, view_height},
 					win_text_bounds
 				),
 				0.5f
@@ -691,20 +720,23 @@ int main(void)
 
 			win_text = "Press [Enter] to Reset";
 
-			win_text_bounds = MeasureTextEx(default_font, win_text, font_size*0.5f, font_spacing*0.5f);
+			font_size *= 0.5f;
+			font_spacing *= 0.5f;
+
+			win_text_bounds = MeasureTextEx(default_font, win_text, font_size, font_spacing);
 
 			win_text_position = Vector2Scale(
 				Vector2Subtract(
-					(Vector2){GetScreenWidth(), GetScreenHeight()},
+					(Vector2){view_width, view_height},
 					win_text_bounds
 				),
 				0.5f
 			);
 
-			win_text_position.y += 60;
+			win_text_position.y += 60*SCALE;
 
 
-			draw_text_shadowed(default_font, win_text, win_text_position, font_size*0.5f, font_spacing*0.5f, WHITE, BLACK);
+			draw_text_shadowed(default_font, win_text, win_text_position, font_size, font_spacing, WHITE, BLACK);
 
 
 		}
@@ -724,46 +756,7 @@ int main(void)
 		}
 #endif
 
-		// DrawFPS(GetScreenWidth()-100, 10);
-#if 0
-
-
-		DrawText(TextFormat("Screen Size: [%i, %i]", GetScreenWidth(), GetScreenHeight()), 10, 40, 10, GREEN);
-
-		DrawText(TextFormat("Frame Counter: %i", framesCounter), GetScreenWidth()/2, GetScreenHeight()/2, 20, GRAY);
-
-		// Draw window state info
-		DrawText("Following flags can be set after window creation:", 10, 60, 10, GRAY);
-		if (IsWindowState(FLAG_FULLSCREEN_MODE)) DrawText("[F] FLAG_FULLSCREEN_MODE: on", 10, 80, 10, LIME);
-		else DrawText("[F] FLAG_FULLSCREEN_MODE: off", 10, 80, 10, MAROON);
-		if (IsWindowState(FLAG_WINDOW_RESIZABLE)) DrawText("[R] FLAG_WINDOW_RESIZABLE: on", 10, 100, 10, LIME);
-		else DrawText("[R] FLAG_WINDOW_RESIZABLE: off", 10, 100, 10, MAROON);
-		if (IsWindowState(FLAG_WINDOW_UNDECORATED)) DrawText("[D] FLAG_WINDOW_UNDECORATED: on", 10, 120, 10, LIME);
-		else DrawText("[D] FLAG_WINDOW_UNDECORATED: off", 10, 120, 10, MAROON);
-		if (IsWindowState(FLAG_WINDOW_HIDDEN)) DrawText("[H] FLAG_WINDOW_HIDDEN: on", 10, 140, 10, LIME);
-		else DrawText("[H] FLAG_WINDOW_HIDDEN: off", 10, 140, 10, MAROON);
-		if (IsWindowState(FLAG_WINDOW_MINIMIZED)) DrawText("[N] FLAG_WINDOW_MINIMIZED: on", 10, 160, 10, LIME);
-		else DrawText("[N] FLAG_WINDOW_MINIMIZED: off", 10, 160, 10, MAROON);
-		if (IsWindowState(FLAG_WINDOW_MAXIMIZED)) DrawText("[M] FLAG_WINDOW_MAXIMIZED: on", 10, 180, 10, LIME);
-		else DrawText("[M] FLAG_WINDOW_MAXIMIZED: off", 10, 180, 10, MAROON);
-		if (IsWindowState(FLAG_WINDOW_UNFOCUSED)) DrawText("[G] FLAG_WINDOW_UNFOCUSED: on", 10, 200, 10, LIME);
-		else DrawText("[U] FLAG_WINDOW_UNFOCUSED: off", 10, 200, 10, MAROON);
-		if (IsWindowState(FLAG_WINDOW_TOPMOST)) DrawText("[T] FLAG_WINDOW_TOPMOST: on", 10, 220, 10, LIME);
-		else DrawText("[T] FLAG_WINDOW_TOPMOST: off", 10, 220, 10, MAROON);
-		if (IsWindowState(FLAG_WINDOW_ALWAYS_RUN)) DrawText("[A] FLAG_WINDOW_ALWAYS_RUN: on", 10, 240, 10, LIME);
-		else DrawText("[A] FLAG_WINDOW_ALWAYS_RUN: off", 10, 240, 10, MAROON);
-		if (IsWindowState(FLAG_VSYNC_HINT)) DrawText("[V] FLAG_VSYNC_HINT: on", 10, 260, 10, LIME);
-		else DrawText("[V] FLAG_VSYNC_HINT: off", 10, 260, 10, MAROON);
-
-		DrawText("Following flags can only be set before window creation:", 10, 300, 10, GRAY);
-		if (IsWindowState(FLAG_WINDOW_HIGHDPI)) DrawText("FLAG_WINDOW_HIGHDPI: on", 10, 320, 10, LIME);
-		else DrawText("FLAG_WINDOW_HIGHDPI: off", 10, 320, 10, MAROON);
-		if (IsWindowState(FLAG_WINDOW_TRANSPARENT)) DrawText("FLAG_WINDOW_TRANSPARENT: on", 10, 340, 10, LIME);
-		else DrawText("FLAG_WINDOW_TRANSPARENT: off", 10, 340, 10, MAROON);
-		if (IsWindowState(FLAG_MSAA_4X_HINT)) DrawText("FLAG_MSAA_4X_HINT: on", 10, 360, 10, LIME);
-		else DrawText("FLAG_MSAA_4X_HINT: off", 10, 360, 10, MAROON);
-#endif
-
+		// DrawFPS(view_width-100, 10);
 
 
 		EndMode2D();
