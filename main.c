@@ -149,8 +149,6 @@ float random_01() {
 
 	float result = val.as_float - 1.0f;
 
-	printf("%x\n", val.as_int);
-
 	return result;
 }
 
@@ -273,9 +271,7 @@ int main(void)
 {
 	{
 		long t = time(NULL);
-		random_state ^= t*13 ^ (t>>4);
-		for (int i = 0; i < 1000; ++i) printf("%f\n", random_01());
-
+		random_state ^= (t*13) ^ (t>>4);
 	}
 
 	// Initialization
