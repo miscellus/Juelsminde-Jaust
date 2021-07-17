@@ -353,16 +353,15 @@ int main(void)
 	SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
 	//----------------------------------------------------------
 
+	float view_width = GetScreenWidth();
+	float view_height = GetScreenHeight();
+	float SCALE = 0.5f*((view_width/1440.0f)+(view_height/900.0f));
+
 	// Main game loop
 	while (!WindowShouldClose())    // Detect window close button or ESC key
 	{
 		float dt = GetFrameTime();
 		double current_time = GetTime();
-
-		float view_width = GetScreenWidth();
-		float view_height = GetScreenHeight();
-		const float SCALE = 0.5f*((view_width/1440.0f)+(view_height/900.0f));
-
 
 		// Update
 		//-----------------------------------------------------
@@ -376,6 +375,42 @@ int main(void)
 			}
 			else {
 				reset_game(game_state);
+			}
+		}
+
+		if (IsWindowResized()) {
+			view_width = GetScreenWidth();
+			view_height = GetScreenHeight();
+			SCALE = 0.5f*((view_width/1440.0f)+(view_height/900.0f));
+
+			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
+
+				Player *player = game_state->players + player_index;
+
+				float radius = radius_from_energy(player->energy) * SCALE; 
+
+				Rectangle view_rectangle = {0, 0, view_width, view_height};
+
+				if (!CheckCollisionPointRec(player->position, view_rectangle)) {
+
+					Vector2 min_corner = Vector2SubtractValue(player->position, radius);
+					Vector2 max_corner = Vector2AddValue(player->position, radius);
+
+					if (min_corner.x < 0) {
+						player->position.x = radius;
+					}
+					else if (max_corner.x > view_width) {
+						player->position.x = view_width - radius;
+					}
+
+					if (min_corner.y < 0) {
+						player->position.y = radius;
+					}
+					else if (max_corner.y > view_height) {
+						player->position.y = view_height - radius;
+					}
+
+				}
 			}
 		}
 
