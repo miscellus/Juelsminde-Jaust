@@ -14,7 +14,7 @@
 #include "jj_math.c"
 
 #define BULLET_DEFAULT_SPEED 100.0f
-#define BULLET_ENERGY_COST 3.0f
+#define BULLET_ENERGY_COST 4.0f
 #define BULLET_RADIUS 15.0f
 #define BULLET_TIME_END_FADE 7.0f
 #define BULLET_TIME_BEGIN_FADE (BULLET_TIME_END_FADE-0.4f)
@@ -259,16 +259,18 @@ View get_view(void) {
 int main(void)
 {
 #ifdef __APPLE__
-	CFBundleRef mainBundle = CFBundleGetMainBundle();
-	CFURLRef resourcesURL = CFBundleCopyResourcesDirectoryURL(mainBundle);
-	char path[PATH_MAX];
-	if (!CFURLGetFileSystemRepresentation(resourcesURL, TRUE, (UInt8 *)path, PATH_MAX))
 	{
-		// error!
-	}
-	CFRelease(resourcesURL);
+		CFBundleRef mainBundle = CFBundleGetMainBundle();
+		CFURLRef resourcesURL = CFBundleCopyResourcesDirectoryURL(mainBundle);
+		char path[PATH_MAX];
+		if (!CFURLGetFileSystemRepresentation(resourcesURL, TRUE, (UInt8 *)path, PATH_MAX))
+		{
+			// error!
+		}
+		CFRelease(resourcesURL);
 
-	chdir(path);
+		chdir(path);
+	}
 #endif
 
 
@@ -326,8 +328,8 @@ int main(void)
 		.key_down = KEY_DOWN,
 		.sound_pop = LoadSound("resources/pop.wav"),
 		.sound_hit = LoadSound("resources/hit3.wav"),
-		.acceleration_force = 800.0f, 
-		.friction = 0.5f,
+		.acceleration_force = 1100.0f, 
+		.friction = 0.94f,
 		.color = (Color){240, 120, 0, 255},
 	};
 	player_parameters[1] = (Player_Parameters){
@@ -337,8 +339,8 @@ int main(void)
 		.key_down = KEY_S,
 		.sound_pop = LoadSound("resources/pop2.wav"),
 		.sound_hit = LoadSound("resources/hit4.wav"),
-		.acceleration_force = 800.0f, 
-		.friction = 0.5f,
+		.acceleration_force = 1100.0f, 
+		.friction = 0.94f,
 		.color = (Color){0, 120, 240, 255},
 	};
 
@@ -441,10 +443,17 @@ int main(void)
 						acceleration
 					);
 
+					float friction_factor = 1.0f;
+
+					if (player_direction_control.x == 0.0f && player_direction_control.y == 0.0f) {
+						friction_factor = 0.3f;
+					}
+
+					float friction_to_apply = parameters->friction * friction_factor * dt;
 
 					player->velocity = Vector2Subtract(
 						player->velocity,
-						Vector2Scale(player->velocity, parameters->friction * dt)
+						Vector2Scale(player->velocity, friction_to_apply)
 					);
 
 					Vector2 to_position = player->position = Vector2Add(
@@ -454,6 +463,8 @@ int main(void)
 
 					float player_radius = radius_from_energy(player->energy);
 
+					float bounce_loss = 0.4f;
+
 					if (player->velocity.x > 0) {
 						float difference = view.width - (to_position.x + player_radius);
 
@@ -462,7 +473,7 @@ int main(void)
 							
 							if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullets(player, &random_state);
 
-							player->velocity.x = (1.0f-parameters->friction)*(-player->velocity.x + difference);	
+							player->velocity.x = (1.0f - bounce_loss)*(-player->velocity.x + difference);	
 						}
 					}
 					
@@ -474,7 +485,7 @@ int main(void)
 
 							if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullets(player, &random_state);
 
-							player->velocity.x = (1.0f-parameters->friction)*(-player->velocity.x + difference);
+							player->velocity.x = (1.0f - bounce_loss)*(-player->velocity.x + difference);
 						}
 					}
 
@@ -486,7 +497,7 @@ int main(void)
 							
 							if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullets(player, &random_state);
 
-							player->velocity.y = (1.0f-parameters->friction)*(-player->velocity.y + difference);
+							player->velocity.y = (1.0f - bounce_loss)*(-player->velocity.y + difference);
 						}
 					}
 					
@@ -498,7 +509,7 @@ int main(void)
 							
 							if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullets(player, &random_state);
 							
-							player->velocity.y = (1.0f-parameters->friction)*(-player->velocity.y + difference);
+							player->velocity.y = (1.0f - bounce_loss)*(-player->velocity.y + difference);
 						}
 					}
 
