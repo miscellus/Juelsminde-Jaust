@@ -14,7 +14,7 @@
 #include "jj_math.c"
 
 #define BULLET_DEFAULT_SPEED 100.0f
-#define BULLET_ENERGY_COST 4.0f
+#define BULLET_ENERGY_COST 5.0f
 #define BULLET_RADIUS 15.0f
 #define BULLET_TIME_END_FADE 7.0f
 #define BULLET_TIME_BEGIN_FADE (BULLET_TIME_END_FADE-0.4f)
@@ -414,125 +414,187 @@ int main(void)
 
 		if (game_state->triumphant_player < 0 && IsWindowFocused()) {
 
-			// Update players
-
+			// Update player input and velocity
 			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
 
 				Player *player = game_state->players + player_index;
 				
+				
+				Vector2 player_direction_control = {0.0f, 0.0f};
+
+				Player_Parameters *parameters = player->parameters;
+
+				if (IsKeyDown(parameters->key_left)) player_direction_control.x = -1.0f;
+				if (IsKeyDown(parameters->key_right)) player_direction_control.x += 1.0f;
+				if (IsKeyDown(parameters->key_up)) player_direction_control.y = -1.0f;
+				if (IsKeyDown(parameters->key_down)) player_direction_control.y += 1.0f;
+
+				player_direction_control = Vector2NormalizeOrZero(player_direction_control);
+
+				Vector2 acceleration = Vector2Scale(
+					player_direction_control,
+					parameters->acceleration_force * dt
+				);
+
+				player->velocity = Vector2Add(
+					player->velocity,
+					acceleration
+				);
+
+				float friction_factor = 1.0f;
+
+				if (player_direction_control.x == 0.0f && player_direction_control.y == 0.0f) {
+					friction_factor = 0.3f;
+				}
+
+				float friction_to_apply = parameters->friction * friction_factor * dt;
+
+				player->velocity = Vector2Subtract(
+					player->velocity,
+					Vector2Scale(player->velocity, friction_to_apply)
+				);
+			}
+
+			// Player collision detection and response
+			{
+				Player *player1 = game_state->players + 0;
+				Player *player2 = game_state->players + 1;
+
+				Vector2 player1_to_position = Vector2Add(player1->position, Vector2Scale(player1->velocity, dt));
+				Vector2 player2_to_position = Vector2Add(player2->position, Vector2Scale(player2->velocity, dt));
+
+				float player1_radius = radius_from_energy(player1->energy);
+				float player2_radius = radius_from_energy(player2->energy);
+
+				float radii_sum = player2_radius + player1_radius;
+
+				Vector2 position_difference = Vector2Subtract(player2_to_position, player1_to_position);
+				float distance = Vector2Length(position_difference);
+
+				if (distance <= radii_sum) {
+					
+					// Static collision
+					float half_overlap = 0.5f*(distance - radii_sum);
+
+					float inv_distance = 1.0f/distance;
+
+					player1->position = player1_to_position = Vector2Add(player1_to_position, Vector2Scale(position_difference, half_overlap*inv_distance));
+					player2->position = player2_to_position = Vector2Add(player2_to_position, Vector2Scale(position_difference, -half_overlap*inv_distance));
+
+					// Dynamic collision
+					// assert(fabs(radii_sum - Vector2Length(position_difference)) < 0.0001f);
+					distance = Vector2Length(position_difference);; // After the move, the distance is exactly equal to the sum of radii
+					inv_distance = 1.0f/distance; // After the move, the distance is exactly equal to the sum of radii
+					position_difference = Vector2Subtract(player2_to_position, player1_to_position);
+
+					Vector2 normal = Vector2Scale(position_difference, inv_distance);
+					Vector2 tangent = (Vector2){normal.y, -normal.x};
+
+					float normal_response_1 = Vector2DotProduct(normal, player1->velocity);
+					float normal_response_2 = Vector2DotProduct(normal, player2->velocity);
+				
+					float tangental_response_1 = Vector2DotProduct(tangent, player1->velocity);
+					float tangental_response_2 = Vector2DotProduct(tangent, player2->velocity);
+
+					float mass_1 = 1.0f;
+					float mass_2 = 1.0f;
+
+					float momentum_1 = (normal_response_1 * (mass_1 - mass_2) + 2.0f * mass_2 * normal_response_2) / (mass_1 + mass_2);
+					float momentum_2 = (normal_response_2 * (mass_2 - mass_1) + 2.0f * mass_1 * normal_response_1) / (mass_1 + mass_2);
+
+					player1->velocity = Vector2Add(
+						Vector2Scale(tangent, tangental_response_1),
+						Vector2Scale(normal, momentum_1)
+					);
+					
+					player2->velocity = Vector2Add(
+						Vector2Scale(tangent, tangental_response_2),
+						Vector2Scale(normal, momentum_2)
+					);
+				}
+			}
+
+			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
+
+				Player *player = game_state->players + player_index;
+				Player *opponent = game_state->players + (1-player_index);
+
+				Vector2 target_position = player->position = Vector2Add(
+					player->position,
+					Vector2Scale(player->velocity, dt)
+				);
+
+				float player_radius = radius_from_energy(player->energy);
+				float opponent_radius = radius_from_energy(opponent->energy);
+
+
+				// Bounce on view edges
 				{
-					Vector2 player_direction_control = {0.0f, 0.0f};
+					float bounce_back_factor = 0.4f;
 
-					Player_Parameters *parameters = player->parameters;
+					if (player->velocity.x > 0) {
+						float difference = view.width - (target_position.x + player_radius);
 
-					if (IsKeyDown(parameters->key_left)) player_direction_control.x = -1.0f;
-					if (IsKeyDown(parameters->key_right)) player_direction_control.x += 1.0f;
-					if (IsKeyDown(parameters->key_up)) player_direction_control.y = -1.0f;
-					if (IsKeyDown(parameters->key_down)) player_direction_control.y += 1.0f;
+						if (difference < 0) {
+							target_position.x = view.width - player_radius;
+							
+							if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullet_ring(player, &random_state);
 
-					player_direction_control = Vector2NormalizeOrZero(player_direction_control);
-
-					Vector2 acceleration = Vector2Scale(
-						player_direction_control,
-						parameters->acceleration_force * dt
-					);
-
-					player->velocity = Vector2Add(
-						player->velocity,
-						acceleration
-					);
-
-					float friction_factor = 1.0f;
-
-					if (player_direction_control.x == 0.0f && player_direction_control.y == 0.0f) {
-						friction_factor = 0.3f;
+							player->velocity.x = bounce_back_factor*(-player->velocity.x + difference);	
+						}
 					}
+					
+					if (player->velocity.x < 0) {
+						float difference = 0 - (target_position.x - player_radius);
 
-					float friction_to_apply = parameters->friction * friction_factor * dt;
+						if (difference > 0) {
+							target_position.x = 0 + player_radius;
 
-					player->velocity = Vector2Subtract(
-						player->velocity,
-						Vector2Scale(player->velocity, friction_to_apply)
-					);
+							if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullet_ring(player, &random_state);
 
-					Vector2 to_position = player->position = Vector2Add(
-						player->position,
-						Vector2Scale(player->velocity, dt)
-					);
-
-					float player_radius = radius_from_energy(player->energy);
-
-
-					// Bounce on view edges
-					{
-						float bounce_back_factor = 0.4f;
-
-						if (player->velocity.x > 0) {
-							float difference = view.width - (to_position.x + player_radius);
-
-							if (difference < 0) {
-								to_position.x = view.width - player_radius;
-								
-								if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullet_ring(player, &random_state);
-
-								player->velocity.x = bounce_back_factor*(-player->velocity.x + difference);	
-							}
-						}
-						
-						if (player->velocity.x < 0) {
-							float difference = 0 - (to_position.x - player_radius);
-
-							if (difference > 0) {
-								to_position.x = 0 + player_radius;
-
-								if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullet_ring(player, &random_state);
-
-								player->velocity.x = bounce_back_factor*(-player->velocity.x + difference);
-							}
-						}
-
-						if (player->velocity.y > 0) {
-							float difference = view.height - (to_position.y + player_radius);
-
-							if (difference < 0) {
-								to_position.y = view.height - player_radius;
-								
-								if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullet_ring(player, &random_state);
-
-								player->velocity.y = bounce_back_factor*(-player->velocity.y + difference);
-							}
-						}
-						
-						if (player->velocity.y < 0) {
-							float difference = 0 - (to_position.y - player_radius);
-
-							if (difference > 0) {
-								to_position.y = 0 + player_radius;
-								
-								if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullet_ring(player, &random_state);
-								
-								player->velocity.y = bounce_back_factor*(-player->velocity.y + difference);
-							}
+							player->velocity.x = bounce_back_factor*(-player->velocity.x + difference);
 						}
 					}
 
-					player->position = to_position;
+					if (player->velocity.y > 0) {
+						float difference = view.height - (target_position.y + player_radius);
 
-					float speed = Vector2Length(player->velocity);
+						if (difference < 0) {
+							target_position.y = view.height - player_radius;
+							
+							if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullet_ring(player, &random_state);
 
-					player->energy += speed * dt / (player->energy*1.0f + 1.0f);
-
-					if (player->hit_animation_t < 1.0f) {
-						player->hit_animation_t += dt*4.0f;
+							player->velocity.y = bounce_back_factor*(-player->velocity.y + difference);
+						}
 					}
+					
+					if (player->velocity.y < 0) {
+						float difference = 0 - (target_position.y - player_radius);
+
+						if (difference > 0) {
+							target_position.y = 0 + player_radius;
+							
+							if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullet_ring(player, &random_state);
+							
+							player->velocity.y = bounce_back_factor*(-player->velocity.y + difference);
+						}
+					}
+				}
+
+				player->position = target_position;
+
+				float speed = Vector2Length(player->velocity);
+
+				player->energy += speed * dt / (player->energy*1.0f + 1.0f);
+
+				if (player->hit_animation_t < 1.0f) {
+					player->hit_animation_t += dt*4.0f;
 				}
 
 				if (game_state->title_alpha > 0) {
 					game_state->title_alpha -= Vector2Length(player->velocity)*0.0001f;
 				}
 
-				Player *opponent = game_state->players + (1-player_index);
-				float opponent_radius = radius_from_energy(opponent->energy);
 
 				for (int bullet_index = 0; bullet_index < player->active_bullets; ++bullet_index) {
 
