@@ -6,9 +6,12 @@
 #include <stdint.h>
 #include <time.h>
 
-// #define ASPECT_RATIO (16.0f/10.0f)
-// #define VIEW_WIDTH 1440
-// #define VIEW_HEIGHT (VIEW_WIDTH/ASPECT_RATIO)
+#ifdef __APPLE__
+#include "CoreFoundation/CoreFoundation.h"
+#endif
+
+// Unity-build
+#include "jj_math.c"
 
 #define BULLET_DEFAULT_SPEED 100.0f
 #define BULLET_ENERGY_COST 3.0f
@@ -90,39 +93,6 @@ typedef struct Game_State {
 	float title_alpha;
 } Game_State;
 
-float sign_float(float v) {
-	return v > 0 ? 1.0f : v < 0 ? -1.0f : 0.0f;
-}
-
-float abs_float(float v) {
-	return v >= 0 ? v : -v;
-}
-
-Vector2 Vector2Sign(Vector2 v) {
-	Vector2 result;
-
-	result.x = sign_float(v.x); 
-	result.y = sign_float(v.y); 
-
-	return result;
-}
-
-Vector2 Vector2Abs(Vector2 v) {
-	Vector2 result;
-
-	result.x = abs_float(v.x); 
-	result.y = abs_float(v.y); 
-
-	return result;
-}
-
-Vector2 Vector2NormalizeOrZero(Vector2 v) {
-	float length = Vector2Length(v);
-	
-	if (length == 0.0f) return v;
-
-	return Vector2Scale(v, 1.0f/length);
-}
 
 int player_compute_max_bullets(Player *player) {
 	return (int)player->energy/BULLET_ENERGY_COST;
@@ -148,23 +118,21 @@ uint64_t xorshift64(uint64_t *state)
 	return *state = x;
 }
 
-static uint64_t random_state = 0xccf134511117;
-
-float random_01() {
+float random_01(uint64_t *random_state) {
 
 	union {
 		uint32_t as_int;
 		float as_float;
 	} val;
 
-	val.as_int = (xorshift64(&random_state)&((1 << 23)-1)) | (127 << 23);
+	val.as_int = (xorshift64(random_state)&((1 << 23)-1)) | (127 << 23);
 
 	float result = val.as_float - 1.0f;
 
 	return result;
 }
 
-void spawn_bullets(Player *player) {
+void spawn_bullets(Player *player, uint64_t *random_state) {
 
 	int count = player_compute_max_bullets(player);
 	float speed = Vector2LengthSqr(player->velocity)/1565;
@@ -181,7 +149,7 @@ void spawn_bullets(Player *player) {
 
 	float angle_quantum = 2.0f*PI / (float)count;
 
-	float angle = random_01()*2.0f*PI;
+	float angle = random_01(random_state)*2.0f*PI;
 
 	for (int i = 0; i < count; ++i) {
 		Bullet *bullet = &player->bullets[player->active_bullets + i];
@@ -290,6 +258,22 @@ View get_view(void) {
 
 int main(void)
 {
+#ifdef __APPLE__
+	CFBundleRef mainBundle = CFBundleGetMainBundle();
+	CFURLRef resourcesURL = CFBundleCopyResourcesDirectoryURL(mainBundle);
+	char path[PATH_MAX];
+	if (!CFURLGetFileSystemRepresentation(resourcesURL, TRUE, (UInt8 *)path, PATH_MAX))
+	{
+		// error!
+	}
+	CFRelease(resourcesURL);
+
+	chdir(path);
+#endif
+
+
+	uint64_t random_state = 0x1955dc895a81c9;
+
 	{
 		long t = time(NULL);
 		random_state ^= (t*13) ^ (t>>4);
@@ -362,13 +346,6 @@ int main(void)
 
 
 	reset_game(game_state);
-
-	Camera2D camera = {
-		.offset = {0},
-		.target = {0},
-		.rotation = 0.0f,
-		.zoom = 1.0f,
-	};
 
 	Font default_font = GetFontDefault();
 
@@ -483,7 +460,7 @@ int main(void)
 						if (difference < 0) {
 							to_position.x = view.width - player_radius;
 							
-							if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullets(player);
+							if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullets(player, &random_state);
 
 							player->velocity.x = (1.0f-parameters->friction)*(-player->velocity.x + difference);	
 						}
@@ -495,7 +472,7 @@ int main(void)
 						if (difference > 0) {
 							to_position.x = 0 + player_radius;
 
-							if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullets(player);
+							if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullets(player, &random_state);
 
 							player->velocity.x = (1.0f-parameters->friction)*(-player->velocity.x + difference);
 						}
@@ -507,7 +484,7 @@ int main(void)
 						if (difference < 0) {
 							to_position.y = view.height - player_radius;
 							
-							if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullets(player);
+							if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullets(player, &random_state);
 
 							player->velocity.y = (1.0f-parameters->friction)*(-player->velocity.y + difference);
 						}
@@ -519,7 +496,7 @@ int main(void)
 						if (difference > 0) {
 							to_position.y = 0 + player_radius;
 							
-							if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullets(player);
+							if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullets(player, &random_state);
 							
 							player->velocity.y = (1.0f-parameters->friction)*(-player->velocity.y + difference);
 						}
@@ -607,7 +584,6 @@ int main(void)
 		//
 
 		BeginDrawing();
-		BeginMode2D(camera);
 
 		float screen_width = GetScreenWidth();
 		float screen_height = GetScreenHeight();
@@ -687,24 +663,28 @@ int main(void)
 
 				Vector2 bullet_screen_position = Vector2Scale(bullet->position, view.scale);
 
+				float s = bullet->time < 0.5f ? bullet->time/0.5f : 1.0f;
+
+				Vector2 direction = Vector2Scale(bullet->velocity, -0.3f*s);
+
+				Vector2 point_tail = Vector2Add(bullet_screen_position, direction);
+
+				Vector2 tail_to_position_difference = Vector2Subtract(bullet_screen_position, point_tail);
+
+				float mid_circle_radius = 0.5f*Vector2Length(tail_to_position_difference);
+
+				Vector2 mid_point = Vector2Add(point_tail, Vector2Scale(tail_to_position_difference, 0.5f));
+
+				Intersection_Points result = intersection_points_from_two_circles(bullet_screen_position, bullet_radius, mid_point, mid_circle_radius);
+
+				if (result.are_intersecting) {
+					Color tail_color = parameters->color;
+					tail_color.a = 32;
+					DrawTriangle(point_tail, result.intersection_points[0], result.intersection_points[1], tail_color);
+				}
+
 				DrawCircleV(bullet_screen_position, bullet_radius, parameters->color);
 
-
-				if (1) {
-					Vector2 direction = Vector2NormalizeOrZero(bullet->velocity);
-					Vector2 front = Vector2Scale(direction, bullet_radius);
-
-					Vector2 point_tail = Vector2Subtract(bullet_screen_position, Vector2Scale(direction, bullet_radius*2));
-					Vector2 point_left = Vector2Add(bullet_screen_position, Vector2Rotate(front, 115));
-					Vector2 point_right = Vector2Add(bullet_screen_position, Vector2Rotate(front, -115));
-
-					DrawTriangle(point_tail, point_left, point_right, parameters->color);
-
-					// Cx^2 + Cy^2 = Cr^2
-					// Mx^2 + My^2 = Mr^2
-
-					// Cx^2 + Cy^2 - Mx^2 - My^2 = Cr^2 - Mr^2
-				}
 			}
 
 			float player_radius = radius_from_energy(player->energy)*view.scale;
@@ -827,25 +807,8 @@ int main(void)
 			draw_text_shadowed(default_font, reset_button_text, draw_position, reset_button_text_font_size, reset_button_text_font_spacing, WHITE, BLACK);
 		}
 
-#if 0
-		Vector2 a = {300, 300};
-		Vector2 b = Vector2Add(a, Vector2Scale((Vector2){cosf(current_time), sinf(current_time)}, 100.0f));
-
-		DrawCircleV(a, 10, RED);
-		DrawCircleV(b, 10, GREEN);
-
-		if (IsKeyPressed(KEY_ONE)) {
-
-			float angle = (360+90)-Vector2Angle(b, a);
-
-			spawn_ring(game_state, b, 1, angle);
-		}
-#endif
-
 		// DrawFPS(view_width-100, 10);
 
-
-		EndMode2D();
 		EndDrawing();
 		//-----------------------------------------------------
 	}
