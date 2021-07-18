@@ -132,7 +132,7 @@ float random_01(uint64_t *random_state) {
 	return result;
 }
 
-void spawn_bullets(Player *player, uint64_t *random_state) {
+void spawn_bullet_ring(Player *player, uint64_t *random_state) {
 
 	int count = player_compute_max_bullets(player);
 	float speed = Vector2LengthSqr(player->velocity)/1565;
@@ -326,8 +326,8 @@ int main(void)
 		.key_right = KEY_RIGHT,
 		.key_up = KEY_UP,
 		.key_down = KEY_DOWN,
-		.sound_pop = LoadSound("resources/pop.wav"),
-		.sound_hit = LoadSound("resources/hit3.wav"),
+		.sound_pop = LoadSound("resources/player_1_pop.wav"),
+		.sound_hit = LoadSound("resources/player_1_hit.wav"),
 		.acceleration_force = 1100.0f, 
 		.friction = 0.94f,
 		.color = (Color){240, 120, 0, 255},
@@ -337,14 +337,14 @@ int main(void)
 		.key_right = KEY_D,
 		.key_up = KEY_W,
 		.key_down = KEY_S,
-		.sound_pop = LoadSound("resources/pop2.wav"),
-		.sound_hit = LoadSound("resources/hit4.wav"),
+		.sound_pop = LoadSound("resources/player_2_pop.wav"),
+		.sound_hit = LoadSound("resources/player_2_hit.wav"),
 		.acceleration_force = 1100.0f, 
 		.friction = 0.94f,
 		.color = (Color){0, 120, 240, 255},
 	};
 
-	game_state->sound_win = LoadSound("resources/win2.wav");
+	game_state->sound_win = LoadSound("resources/win.wav");
 
 
 	reset_game(game_state);
@@ -420,7 +420,6 @@ int main(void)
 
 				Player *player = game_state->players + player_index;
 				
-				// player_update(player, dt);
 				{
 					Vector2 player_direction_control = {0.0f, 0.0f};
 
@@ -463,53 +462,57 @@ int main(void)
 
 					float player_radius = radius_from_energy(player->energy);
 
-					float bounce_loss = 0.4f;
 
-					if (player->velocity.x > 0) {
-						float difference = view.width - (to_position.x + player_radius);
+					// Bounce on view edges
+					{
+						float bounce_back_factor = 0.4f;
 
-						if (difference < 0) {
-							to_position.x = view.width - player_radius;
-							
-							if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullets(player, &random_state);
+						if (player->velocity.x > 0) {
+							float difference = view.width - (to_position.x + player_radius);
 
-							player->velocity.x = (1.0f - bounce_loss)*(-player->velocity.x + difference);	
+							if (difference < 0) {
+								to_position.x = view.width - player_radius;
+								
+								if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullet_ring(player, &random_state);
+
+								player->velocity.x = bounce_back_factor*(-player->velocity.x + difference);	
+							}
 						}
-					}
-					
-					if (player->velocity.x < 0) {
-						float difference = 0 - (to_position.x - player_radius);
+						
+						if (player->velocity.x < 0) {
+							float difference = 0 - (to_position.x - player_radius);
 
-						if (difference > 0) {
-							to_position.x = 0 + player_radius;
+							if (difference > 0) {
+								to_position.x = 0 + player_radius;
 
-							if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullets(player, &random_state);
+								if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullet_ring(player, &random_state);
 
-							player->velocity.x = (1.0f - bounce_loss)*(-player->velocity.x + difference);
+								player->velocity.x = bounce_back_factor*(-player->velocity.x + difference);
+							}
 						}
-					}
 
-					if (player->velocity.y > 0) {
-						float difference = view.height - (to_position.y + player_radius);
+						if (player->velocity.y > 0) {
+							float difference = view.height - (to_position.y + player_radius);
 
-						if (difference < 0) {
-							to_position.y = view.height - player_radius;
-							
-							if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullets(player, &random_state);
+							if (difference < 0) {
+								to_position.y = view.height - player_radius;
+								
+								if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullet_ring(player, &random_state);
 
-							player->velocity.y = (1.0f - bounce_loss)*(-player->velocity.y + difference);
+								player->velocity.y = bounce_back_factor*(-player->velocity.y + difference);
+							}
 						}
-					}
-					
-					if (player->velocity.y < 0) {
-						float difference = 0 - (to_position.y - player_radius);
+						
+						if (player->velocity.y < 0) {
+							float difference = 0 - (to_position.y - player_radius);
 
-						if (difference > 0) {
-							to_position.y = 0 + player_radius;
-							
-							if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullets(player, &random_state);
-							
-							player->velocity.y = (1.0f - bounce_loss)*(-player->velocity.y + difference);
+							if (difference > 0) {
+								to_position.y = 0 + player_radius;
+								
+								if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullet_ring(player, &random_state);
+								
+								player->velocity.y = bounce_back_factor*(-player->velocity.y + difference);
+							}
 						}
 					}
 
@@ -677,7 +680,7 @@ int main(void)
 
 				Vector2 bullet_screen_position = Vector2Scale(bullet->position, view.scale);
 
-				float s = bullet->time < 0.5f ? bullet->time/0.5f : 1.0f;
+				float s = bullet->time < 0.3f ? bullet->time/0.3f : 1.0f;
 
 				Vector2 direction = Vector2Scale(bullet->velocity, -0.2f*s*view.scale);
 
