@@ -591,7 +591,9 @@ int main(void)
 
 		ClearBackground((Color){255, 255, 255, 255});
 
+		//
 		// Draw Title
+		//
 		if (game_state->title_alpha > 0) {
 
 			Color title_color = (Color){192, 192, 192, game_state->title_alpha*255.0f};
@@ -615,7 +617,9 @@ int main(void)
 		}
 
 
+		//
 		// Draw rings
+		//
 		for (int ring_index = 0; ring_index < game_state->ring_pool.active_rings; ++ring_index) {
 			
 			Ring ring = game_state->ring_pool.rings[ring_index];
@@ -639,7 +643,7 @@ int main(void)
 		}
 
 		//
-		// Draw players
+		// Draw player's bullets
 		//
 		for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
 
@@ -647,7 +651,6 @@ int main(void)
 
 			Player_Parameters *parameters = player->parameters; 
 
-			// Draw player's bullets
 			for (int bullet_index = 0; bullet_index < player->active_bullets; ++bullet_index) {
 
 				Bullet *bullet = &player->bullets[bullet_index];
@@ -665,7 +668,7 @@ int main(void)
 
 				float s = bullet->time < 0.5f ? bullet->time/0.5f : 1.0f;
 
-				Vector2 direction = Vector2Scale(bullet->velocity, -0.3f*s);
+				Vector2 direction = Vector2Scale(bullet->velocity, -0.2f*s*view.scale);
 
 				Vector2 point_tail = Vector2Add(bullet_screen_position, direction);
 
@@ -686,6 +689,15 @@ int main(void)
 				DrawCircleV(bullet_screen_position, bullet_radius, parameters->color);
 
 			}
+		}
+
+		//
+		// Draw players
+		//
+		for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
+
+			Player *player = game_state->players + player_index;
+			Player_Parameters *parameters = player->parameters;
 
 			float player_radius = radius_from_energy(player->energy)*view.scale;
 			float font_size = player_radius*1.0f;
