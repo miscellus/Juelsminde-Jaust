@@ -304,7 +304,7 @@ int main(void)
 	InitAudioDevice();
 	assert(IsAudioDeviceReady());
 
-	const char *title = "Juelsminde Jaust";
+	const char *title = "Juelsminde Joust";
 
 	// Set configuration flags for window creation
 	SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
