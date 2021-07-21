@@ -99,9 +99,9 @@ float radius_from_energy(float energy) {
 }
 
 
-bool hit_is_hard_enough(float hit, float delta_time) {
+bool hit_is_hard_enough(float hit) {
 
-	return 5000.0f*delta_time <= fabs(hit);
+	return 10000.0f <= fabs(hit);
 }
 
 
@@ -131,7 +131,7 @@ float random_01(uint64_t *random_state) {
 void spawn_bullet_ring(Player *player, uint64_t *random_state) {
 
 	int count = player_compute_max_bullets(player);
-	float speed = Vector2LengthSqr(player->velocity)/1565;
+	float speed = 50.0f + Vector2LengthSqr(player->velocity)/1565;
 
 	if (player->active_bullets + count > MAX_ACTIVE_BULLETS) {
 		count = MAX_ACTIVE_BULLETS - player->active_bullets;
@@ -478,11 +478,11 @@ int main(void)
 						Vector2Scale(normal, momentum_2)
 					);
 
-					if (hit_is_hard_enough(normal_response_1, dt)) {
+					if (hit_is_hard_enough(normal_response_1/dt)) {
 						spawn_bullet_ring(player1, &random_state);
 					}
 					
-					if (hit_is_hard_enough(normal_response_2, dt)) {
+					if (hit_is_hard_enough(normal_response_2/dt)) {
 						spawn_bullet_ring(player2, &random_state);
 					}
 				}
@@ -501,7 +501,6 @@ int main(void)
 				float player_radius = radius_from_energy(player->energy);
 				float opponent_radius = radius_from_energy(opponent->energy);
 
-
 				// Bounce on view edges
 				{
 					float bounce_back_factor = -0.6f;
@@ -509,49 +508,55 @@ int main(void)
 
 					float cumulative_edge_bounce = 0.0f;
 
-					edge_offset = view.width - (target_position.x + player_radius);
+					if (player->velocity.x > 0) {
+						edge_offset = view.width - (target_position.x + player_radius);
 
-					if (edge_offset < 0) {
-						target_position.x = view.width - player_radius;
-						
-						cumulative_edge_bounce += fabs(player->velocity.x);
+						if (edge_offset < 0) {
+							target_position.x = view.width - player_radius;
+							
+							cumulative_edge_bounce += fabs(player->velocity.x);
 
-						player->velocity.x = bounce_back_factor*(player->velocity.x + edge_offset);	
+							player->velocity.x = bounce_back_factor*(player->velocity.x + edge_offset);	
+						}
 					}
-					
-					edge_offset = (target_position.x - player_radius) - 0;
+					else {
+						edge_offset = (target_position.x - player_radius) - 0;
 
-					if (edge_offset < 0) {
-						target_position.x = 0 + player_radius;
+						if (edge_offset < 0) {
+							target_position.x = 0 + player_radius;
 
-						cumulative_edge_bounce += fabs(player->velocity.x);
+							cumulative_edge_bounce += fabs(player->velocity.x);
 
-						player->velocity.x = bounce_back_factor*(player->velocity.x + edge_offset);
-					}
-
-					edge_offset = view.height - (target_position.y + player_radius);
-
-					if (edge_offset < 0) {
-						target_position.y = view.height - player_radius;
-
-						cumulative_edge_bounce += fabs(player->velocity.y);
-
-						player->velocity.y = bounce_back_factor*(player->velocity.y + edge_offset);
-
-					}
-				
-					edge_offset = (target_position.y - player_radius) - 0;
-
-					if (edge_offset < 0) {
-						target_position.y = 0 + player_radius;
-						
-						cumulative_edge_bounce += fabs(player->velocity.y);
-						
-						player->velocity.y = bounce_back_factor*(player->velocity.y + edge_offset);
+							player->velocity.x = bounce_back_factor*(player->velocity.x + edge_offset);
+						}
 					}
 
+					if (player->velocity.y > 0) {
 
-					if (hit_is_hard_enough(cumulative_edge_bounce, dt)) {
+						edge_offset = view.height - (target_position.y + player_radius);
+
+						if (edge_offset < 0) {
+							target_position.y = view.height - player_radius;
+
+							cumulative_edge_bounce += fabs(player->velocity.y);
+
+							player->velocity.y = bounce_back_factor*(player->velocity.y + edge_offset);
+
+						}
+					}
+					else {
+						edge_offset = (target_position.y - player_radius) - 0;
+
+						if (edge_offset < 0) {
+							target_position.y = 0 + player_radius;
+							
+							cumulative_edge_bounce += fabs(player->velocity.y);
+							
+							player->velocity.y = bounce_back_factor*(player->velocity.y + edge_offset);
+						}
+					}
+
+					if (hit_is_hard_enough(cumulative_edge_bounce/dt)) {
 						spawn_bullet_ring(player, &random_state);
 					}
 				}
