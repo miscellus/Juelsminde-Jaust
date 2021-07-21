@@ -101,7 +101,7 @@ float radius_from_energy(float energy) {
 
 bool hit_is_hard_enough(float hit, float delta_time) {
 
-	return 4000.0f*delta_time <= fabs(hit);
+	return 5000.0f*delta_time <= fabs(hit);
 }
 
 
@@ -186,23 +186,8 @@ bool position_outside_playzone(Vector2 position, View view) {
 }
 
 void draw_text_shadowed(Font font, const char *text, Vector2 position, float font_size, float font_spacing, Color front_color, Color background_color) {
-	DrawTextEx(
-		font,
-		text,
-		Vector2Add(position, (Vector2){3, 3}),
-		font_size,
-		font_spacing,
-		background_color
-	);
-
-	DrawTextEx(
-		font,
-		text,
-		position,
-		font_size,
-		font_spacing,
-		front_color
-	);
+	DrawTextEx(font, text, Vector2Add(position, (Vector2){3, 3}), font_size, font_spacing, background_color);
+	DrawTextEx(font, text, position, font_size, font_spacing, front_color);
 }
 
 

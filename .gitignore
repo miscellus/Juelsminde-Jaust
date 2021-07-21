@@ -6,6 +6,9 @@ Juelsminde Jaust
 Juelsminde Jaust.app
 Juelsminde Jaust.exe
 
+lib/
+include/
+
 #
 # Sublime text
 #
