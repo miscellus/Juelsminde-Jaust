@@ -14,14 +14,17 @@
 #include "jj_math.c"
 
 #define BULLET_DEFAULT_SPEED 100.0f
-#define BULLET_ENERGY_COST 5.0f
+#define BULLET_ENERGY_COST 4.0f
 #define BULLET_RADIUS 15.0f
 #define BULLET_TIME_END_FADE 7.0f
 #define BULLET_TIME_BEGIN_FADE (BULLET_TIME_END_FADE-0.4f)
 
+#define PLAYER_STARTING_HEALTH 30
 #define PLAYER_MINIMUM_RADIUS 30.0f   
+#define PLAYER_ACCELERATION_FORCE 1100.0f
+#define PLAYER_FRICTION 0.94f
 
-#define FONT_SPACING_FOR_SIZE 0.15f
+#define FONT_SPACING_FOR_SIZE 0.12f
 
 
 #define MINIMUM(a, b) ((a) < (b) ? (a) : (b))
@@ -41,7 +44,6 @@ typedef struct Bullet {
 	float time;
 } Bullet;
 
-#define NUM_PLAYERS 2
 
 typedef struct Player_Parameters
 {
@@ -51,8 +53,6 @@ typedef struct Player_Parameters
 	KeyboardKey key_down;
 	Sound sound_pop;
 	Sound sound_hit;
-	float acceleration_force;
-	float friction;
 	Color color;
 } Player_Parameters;
 
@@ -76,21 +76,17 @@ typedef struct Ring {
 	float t;
 } Ring;
 
-#define MAX_ACTIVE_RINGS 128
-
-typedef struct Ring_Pool {
-	int active_rings;
-	Ring rings[MAX_ACTIVE_RINGS];
-} Ring_Pool;
-
 typedef struct Game_State {
 	View view;
-	Player players[NUM_PLAYERS];
-	Player_Parameters player_parameters[NUM_PLAYERS];
-	Ring_Pool ring_pool;
 	Sound sound_win;
 	int triumphant_player;
 	float title_alpha;
+#define NUM_PLAYERS 2
+	Player players[NUM_PLAYERS];
+	Player_Parameters player_parameters[NUM_PLAYERS];
+#define MAX_ACTIVE_RINGS 128
+	int active_rings;
+	Ring rings[MAX_ACTIVE_RINGS];
 } Game_State;
 
 
@@ -103,9 +99,9 @@ float radius_from_energy(float energy) {
 }
 
 
-bool hit_is_hard_enough(float hit, float delta_time) {
+bool hit_is_hard_enough(float hit) {
 
-	return 4000.0f*delta_time <= fabs(hit);
+	return 10000.0f <= fabs(hit);
 }
 
 
@@ -135,7 +131,7 @@ float random_01(uint64_t *random_state) {
 void spawn_bullet_ring(Player *player, uint64_t *random_state) {
 
 	int count = player_compute_max_bullets(player);
-	float speed = Vector2LengthSqr(player->velocity)/1565;
+	float speed = 50.0f + Vector2LengthSqr(player->velocity)/1565;
 
 	if (player->active_bullets + count > MAX_ACTIVE_BULLETS) {
 		count = MAX_ACTIVE_BULLETS - player->active_bullets;
@@ -166,12 +162,10 @@ void spawn_bullet_ring(Player *player, uint64_t *random_state) {
 
 
 void spawn_ring(Game_State *game_state, Vector2 position, int player_index, float ring_angle) {
-	
-	Ring_Pool *ring_pool = &game_state->ring_pool;
 
-	if (ring_pool->active_rings < MAX_ACTIVE_RINGS) {
+	if (game_state->active_rings < MAX_ACTIVE_RINGS) {
 
-		ring_pool->rings[ring_pool->active_rings++] = (Ring){
+		game_state->rings[game_state->active_rings++] = (Ring){
 			.position = position,
 			.player_index = player_index,
 			.t = 0.0f,
@@ -192,23 +186,8 @@ bool position_outside_playzone(Vector2 position, View view) {
 }
 
 void draw_text_shadowed(Font font, const char *text, Vector2 position, float font_size, float font_spacing, Color front_color, Color background_color) {
-	DrawTextEx(
-		font,
-		text,
-		Vector2Add(position, (Vector2){3, 3}),
-		font_size,
-		font_spacing,
-		background_color
-	);
-
-	DrawTextEx(
-		font,
-		text,
-		position,
-		font_size,
-		font_spacing,
-		front_color
-	);
+	DrawTextEx(font, text, Vector2Add(position, (Vector2){3, 3}), font_size, font_spacing, background_color);
+	DrawTextEx(font, text, position, font_size, font_spacing, front_color);
 }
 
 
@@ -217,19 +196,17 @@ void reset_game(Game_State *game_state) {
 
 	game_state->title_alpha = 1.0f;
 
-	game_state->ring_pool.active_rings = 0;
-
-	const int player_start_health = 30;
+	game_state->active_rings = 0;
 
 	game_state->players[0] = (Player){
 		.position = { game_state->view.width * 2.0f/3.0f, game_state->view.height / 2.0f },
-		.health = player_start_health,
+		.health = PLAYER_STARTING_HEALTH,
 		.hit_animation_t = 1.0f,
 		.parameters = &game_state->player_parameters[0],
 	};
 	game_state->players[1] = (Player){
 		.position = { game_state->view.width * 1.0f/3.0f, game_state->view.height / 2.0f },
-		.health = player_start_health,
+		.health = PLAYER_STARTING_HEALTH,
 		.hit_animation_t = 1.0f,
 		.parameters = &game_state->player_parameters[1],
 	};
@@ -304,7 +281,7 @@ int main(void)
 	InitAudioDevice();
 	assert(IsAudioDeviceReady());
 
-	const char *title = "Juelsminde Jaust";
+	const char *title = "Juelsminde Joust";
 
 	// Set configuration flags for window creation
 	SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
@@ -328,8 +305,6 @@ int main(void)
 		.key_down = KEY_DOWN,
 		.sound_pop = LoadSound("resources/player_1_pop.wav"),
 		.sound_hit = LoadSound("resources/player_1_hit.wav"),
-		.acceleration_force = 1100.0f, 
-		.friction = 0.94f,
 		.color = (Color){240, 120, 0, 255},
 	};
 	player_parameters[1] = (Player_Parameters){
@@ -339,8 +314,6 @@ int main(void)
 		.key_down = KEY_S,
 		.sound_pop = LoadSound("resources/player_2_pop.wav"),
 		.sound_hit = LoadSound("resources/player_2_hit.wav"),
-		.acceleration_force = 1100.0f, 
-		.friction = 0.94f,
 		.color = (Color){0, 120, 240, 255},
 	};
 
@@ -420,39 +393,30 @@ int main(void)
 				Player *player = game_state->players + player_index;
 				
 				
-				Vector2 player_direction_control = {0.0f, 0.0f};
+				Vector2 player_movement_control = {0.0f, 0.0f};
 
 				Player_Parameters *parameters = player->parameters;
 
-				if (IsKeyDown(parameters->key_left)) player_direction_control.x = -1.0f;
-				if (IsKeyDown(parameters->key_right)) player_direction_control.x += 1.0f;
-				if (IsKeyDown(parameters->key_up)) player_direction_control.y = -1.0f;
-				if (IsKeyDown(parameters->key_down)) player_direction_control.y += 1.0f;
+				if (IsKeyDown(parameters->key_left)) player_movement_control.x = -1.0f;
+				if (IsKeyDown(parameters->key_right)) player_movement_control.x += 1.0f;
+				if (IsKeyDown(parameters->key_up)) player_movement_control.y = -1.0f;
+				if (IsKeyDown(parameters->key_down)) player_movement_control.y += 1.0f;
 
-				player_direction_control = Vector2NormalizeOrZero(player_direction_control);
+				float friction_fraction = 1.0f;
 
-				Vector2 acceleration = Vector2Scale(
-					player_direction_control,
-					parameters->acceleration_force * dt
-				);
-
-				player->velocity = Vector2Add(
-					player->velocity,
-					acceleration
-				);
-
-				float friction_factor = 1.0f;
-
-				if (player_direction_control.x == 0.0f && player_direction_control.y == 0.0f) {
-					friction_factor = 0.3f;
+				if (player_movement_control.x == 0.0f && player_movement_control.y == 0.0f) {
+					friction_fraction = 0.1f;
+				}
+				else {
+					// Normalize player movement controls
+					player_movement_control = Vector2Scale(player_movement_control, INV_SQRT_TWO);
 				}
 
-				float friction_to_apply = parameters->friction * friction_factor * dt;
+				Vector2 acceleration = Vector2Scale(player_movement_control, PLAYER_ACCELERATION_FORCE * dt);
 
-				player->velocity = Vector2Subtract(
-					player->velocity,
-					Vector2Scale(player->velocity, friction_to_apply)
-				);
+				acceleration = Vector2Subtract(acceleration, Vector2Scale(player->velocity, PLAYER_FRICTION * friction_fraction * dt));
+
+				player->velocity = Vector2Add(player->velocity, acceleration);
 			}
 
 			// Player collision detection and response
@@ -472,9 +436,11 @@ int main(void)
 				float distance = Vector2Length(position_difference);
 
 				if (distance <= radii_sum) {
+
 					
 					// Static collision
 					float half_overlap = 0.5f*(distance - radii_sum);
+
 
 					float inv_distance = 1.0f/distance;
 
@@ -483,7 +449,7 @@ int main(void)
 
 					// Dynamic collision
 					// assert(fabs(radii_sum - Vector2Length(position_difference)) < 0.0001f);
-					distance = Vector2Length(position_difference);; // After the move, the distance is exactly equal to the sum of radii
+					distance = radii_sum;//Vector2Length(position_difference);; // After the move, the distance is exactly equal to the sum of radii
 					inv_distance = 1.0f/distance; // After the move, the distance is exactly equal to the sum of radii
 					position_difference = Vector2Subtract(player2_to_position, player1_to_position);
 
@@ -496,8 +462,8 @@ int main(void)
 					float tangental_response_1 = Vector2DotProduct(tangent, player1->velocity);
 					float tangental_response_2 = Vector2DotProduct(tangent, player2->velocity);
 
-					float mass_1 = 1.0f;
-					float mass_2 = 1.0f;
+					float mass_1 = radius_from_energy(player1->energy);
+					float mass_2 = radius_from_energy(player2->energy);
 
 					float momentum_1 = (normal_response_1 * (mass_1 - mass_2) + 2.0f * mass_2 * normal_response_2) / (mass_1 + mass_2);
 					float momentum_2 = (normal_response_2 * (mass_2 - mass_1) + 2.0f * mass_1 * normal_response_1) / (mass_1 + mass_2);
@@ -511,6 +477,14 @@ int main(void)
 						Vector2Scale(tangent, tangental_response_2),
 						Vector2Scale(normal, momentum_2)
 					);
+
+					if (hit_is_hard_enough(normal_response_1/dt)) {
+						spawn_bullet_ring(player1, &random_state);
+					}
+					
+					if (hit_is_hard_enough(normal_response_2/dt)) {
+						spawn_bullet_ring(player2, &random_state);
+					}
 				}
 			}
 
@@ -527,57 +501,63 @@ int main(void)
 				float player_radius = radius_from_energy(player->energy);
 				float opponent_radius = radius_from_energy(opponent->energy);
 
-
 				// Bounce on view edges
 				{
-					float bounce_back_factor = 0.4f;
+					float bounce_back_factor = -0.6f;
+					float edge_offset;
+
+					float cumulative_edge_bounce = 0.0f;
 
 					if (player->velocity.x > 0) {
-						float difference = view.width - (target_position.x + player_radius);
+						edge_offset = view.width - (target_position.x + player_radius);
 
-						if (difference < 0) {
+						if (edge_offset < 0) {
 							target_position.x = view.width - player_radius;
 							
-							if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullet_ring(player, &random_state);
+							cumulative_edge_bounce += fabs(player->velocity.x);
 
-							player->velocity.x = bounce_back_factor*(-player->velocity.x + difference);	
+							player->velocity.x = bounce_back_factor*(player->velocity.x + edge_offset);	
 						}
 					}
-					
-					if (player->velocity.x < 0) {
-						float difference = 0 - (target_position.x - player_radius);
+					else {
+						edge_offset = (target_position.x - player_radius) - 0;
 
-						if (difference > 0) {
+						if (edge_offset < 0) {
 							target_position.x = 0 + player_radius;
 
-							if (hit_is_hard_enough(player->velocity.x, dt)) spawn_bullet_ring(player, &random_state);
+							cumulative_edge_bounce += fabs(player->velocity.x);
 
-							player->velocity.x = bounce_back_factor*(-player->velocity.x + difference);
+							player->velocity.x = bounce_back_factor*(player->velocity.x + edge_offset);
 						}
 					}
 
 					if (player->velocity.y > 0) {
-						float difference = view.height - (target_position.y + player_radius);
 
-						if (difference < 0) {
+						edge_offset = view.height - (target_position.y + player_radius);
+
+						if (edge_offset < 0) {
 							target_position.y = view.height - player_radius;
-							
-							if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullet_ring(player, &random_state);
 
-							player->velocity.y = bounce_back_factor*(-player->velocity.y + difference);
+							cumulative_edge_bounce += fabs(player->velocity.y);
+
+							player->velocity.y = bounce_back_factor*(player->velocity.y + edge_offset);
+
 						}
 					}
-					
-					if (player->velocity.y < 0) {
-						float difference = 0 - (target_position.y - player_radius);
+					else {
+						edge_offset = (target_position.y - player_radius) - 0;
 
-						if (difference > 0) {
+						if (edge_offset < 0) {
 							target_position.y = 0 + player_radius;
 							
-							if (hit_is_hard_enough(player->velocity.y, dt)) spawn_bullet_ring(player, &random_state);
+							cumulative_edge_bounce += fabs(player->velocity.y);
 							
-							player->velocity.y = bounce_back_factor*(-player->velocity.y + difference);
+							player->velocity.y = bounce_back_factor*(player->velocity.y + edge_offset);
 						}
+					}
+
+					if (hit_is_hard_enough(cumulative_edge_bounce/dt)) {
+						spawn_bullet_ring(player, &random_state);
 					}
 				}
 
@@ -596,6 +576,7 @@ int main(void)
 				}
 
 
+				// Update bullets
 				for (int bullet_index = 0; bullet_index < player->active_bullets; ++bullet_index) {
 
 					Bullet *bullet = &player->bullets[bullet_index];
@@ -615,7 +596,7 @@ int main(void)
 					if (bullet_overlaps_opponent || position_outside_playzone(bullet_position, view)) {
 						player->bullets[bullet_index--] = player->bullets[--player->active_bullets];
 
-
+						// If bullet overlaps opponent player, subtract health and remove bullet from pool
 						if (bullet_overlaps_opponent) {
 							--opponent->health;
 
@@ -638,14 +619,14 @@ int main(void)
 		}
 		
 		// Update Rings
-		for (int ring_index = 0; ring_index < game_state->ring_pool.active_rings; ) {
+		for (int ring_index = 0; ring_index < game_state->active_rings; ) {
 			
-			Ring *ring = &game_state->ring_pool.rings[ring_index];
+			Ring *ring = &game_state->rings[ring_index];
 
 			ring->t += dt * 2.5f;
 
 			if (ring->t > 1.0f) {
-				game_state->ring_pool.rings[ring_index] = game_state->ring_pool.rings[--game_state->ring_pool.active_rings];
+				game_state->rings[ring_index] = game_state->rings[--game_state->active_rings];
 			}
 			else {
 				++ring_index;
@@ -696,9 +677,9 @@ int main(void)
 		//
 		// Draw rings
 		//
-		for (int ring_index = 0; ring_index < game_state->ring_pool.active_rings; ++ring_index) {
+		for (int ring_index = 0; ring_index < game_state->active_rings; ++ring_index) {
 			
-			Ring ring = game_state->ring_pool.rings[ring_index];
+			Ring ring = game_state->rings[ring_index];
 
 			Color ring_color = game_state->player_parameters[ring.player_index].color;
 
@@ -731,6 +712,20 @@ int main(void)
 
 				Bullet *bullet = &player->bullets[bullet_index];
 
+
+
+				float s = bullet->time < 0.3f ? bullet->time/0.3f : 1.0f;
+
+				Vector2 direction = Vector2Scale(bullet->velocity, -0.2f*s);
+
+				Vector2 point_tail = Vector2Add(bullet->position, direction);
+
+				Vector2 tail_to_position_difference = Vector2Subtract(bullet->position, point_tail);
+
+				float mid_circle_radius = 0.5f*Vector2Length(tail_to_position_difference);
+
+				Vector2 mid_point = Vector2Add(point_tail, Vector2Scale(tail_to_position_difference, 0.5f));
+
 				float t = 1.0f;
 
 				if (bullet->time >= BULLET_TIME_BEGIN_FADE) {
@@ -738,31 +733,24 @@ int main(void)
 					t *= t*t;
 					t = 1.0f - t;
 				}
-				float bullet_radius = BULLET_RADIUS*t*view.scale;
 
-				Vector2 bullet_screen_position = Vector2Scale(bullet->position, view.scale);
+				Circle mid_circle = {mid_point, mid_circle_radius};
 
-				float s = bullet->time < 0.3f ? bullet->time/0.3f : 1.0f;
+				Circle bullet_circle = {bullet->position, BULLET_RADIUS*t};
 
-				Vector2 direction = Vector2Scale(bullet->velocity, -0.2f*s*view.scale);
+				Intersection_Points result = intersection_points_from_two_circles(bullet_circle, mid_circle);
 
-				Vector2 point_tail = Vector2Add(bullet_screen_position, direction);
 
-				Vector2 tail_to_position_difference = Vector2Subtract(bullet_screen_position, point_tail);
-
-				float mid_circle_radius = 0.5f*Vector2Length(tail_to_position_difference);
-
-				Vector2 mid_point = Vector2Add(point_tail, Vector2Scale(tail_to_position_difference, 0.5f));
-
-				Intersection_Points result = intersection_points_from_two_circles(bullet_screen_position, bullet_radius, mid_point, mid_circle_radius);
+				float bullet_scale = t*view.scale;
 
 				if (result.are_intersecting) {
 					Color tail_color = parameters->color;
 					tail_color.a = 32;
-					DrawTriangle(point_tail, result.intersection_points[0], result.intersection_points[1], tail_color);
+					DrawTriangle(Vector2Scale(point_tail, view.scale), Vector2Scale(result.intersection_points[0], view.scale), Vector2Scale(result.intersection_points[1], view.scale), tail_color);
 				}
 
-				DrawCircleV(bullet_screen_position, bullet_radius, parameters->color);
+				Vector2 bullet_screen_position = Vector2Scale(bullet->position, view.scale);
+				DrawCircleV(bullet_screen_position, BULLET_RADIUS*bullet_scale, parameters->color);
 
 			}
 		}
@@ -813,10 +801,7 @@ int main(void)
 
 					if (player->controls_text_timeout < current_time) {
 
-						// float t = 1.0f - (player_speed / max_speed_while_drawing_control_text);
-
 						Color controls_color = parameters->color;
-						// controls_color.a = t*255.0f;
 
 						const char *text = (const char *[]){"Arrow Keys", "W, A, S, D"}[player_index];
 

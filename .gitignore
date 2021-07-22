@@ -5,9 +5,9 @@
 Juelsminde Jaust
 Juelsminde Jaust.app
 Juelsminde Jaust.exe
-
 *.dSYM/
-
+lib/
+include/
 
 #
 # Sublime text

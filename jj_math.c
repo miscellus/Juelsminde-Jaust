@@ -36,14 +36,14 @@ Vector2 Vector2NormalizeOrZero(Vector2 v) {
     return Vector2Scale(v, 1.0f/length);
 }
 
-Intersection_Points intersection_points_from_two_circles(Vector2 center1, float radius1, Vector2 center2, float radius2) {
+Intersection_Points intersection_points_from_two_circles(Circle c1, Circle c2) {
 
     Intersection_Points result = {.are_intersecting = false};
 
-    Vector2 delta = Vector2Subtract(center2, center1);
+    Vector2 delta = Vector2Subtract(c2.center, c1.center);
 
-    float radii_sum = radius2 + radius1;
-    float radii_difference = radius2 - radius1;
+    float radii_sum = c2.radius + c1.radius;
+    float radii_difference = c2.radius - c1.radius;
 
     float squared_distance = Vector2LengthSqr(delta);
 
@@ -59,12 +59,13 @@ Intersection_Points intersection_points_from_two_circles(Vector2 center1, float 
     
     float inv_distance = 1.0f/sqrtf(squared_distance);
 
-    float radius1_squared = radius1*radius1;
+    float radius1_squared = c1.radius*c1.radius;
+    float radius2_squared = c2.radius*c2.radius;
 
-    float a = (radius1_squared - radius2*radius2 + squared_distance)*( 0.5f * inv_distance );
+    float a = (radius1_squared - radius2_squared + squared_distance)*( 0.5f * inv_distance );
     float h = sqrtf(radius1_squared - a*a);
 
-    Vector2 m = Vector2Add(center1, Vector2Scale(delta, a*inv_distance));
+    Vector2 m = Vector2Add(c1.center, Vector2Scale(delta, a*inv_distance));
 
     Vector2 delta_scaled = Vector2Scale(delta, h*inv_distance);
 
