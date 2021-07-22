@@ -6,6 +6,9 @@ Juelsminde Jaust
 Juelsminde Jaust.app
 Juelsminde Jaust.exe
 
+*.dSYM/
+
+
 #
 # Sublime text
 #
@@ -71,4 +74,3 @@ Icon
 .AppleDesktop
 Network Trash Folder
 Temporary Items
-.apdisk
