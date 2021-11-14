@@ -285,7 +285,7 @@ int main(void)
 
 	// Set configuration flags for window creation
 	SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
-	InitWindow(800, 600, title);
+	InitWindow(1920, 1080, title);
 
 	set_window_to_monitor_dimensions();
 	ToggleFullscreen();
@@ -318,7 +318,6 @@ int main(void)
 	};
 
 	game_state->sound_win = LoadSound("resources/win.wav");
-
 
 	reset_game(game_state);
 
