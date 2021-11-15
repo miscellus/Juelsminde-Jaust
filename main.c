@@ -81,7 +81,6 @@ typedef struct Ring {
 } Ring;
 
 typedef struct Game_State {
-	View view;
 	Sound sound_win;
 	int triumphant_player;
 	float title_alpha;
@@ -229,7 +228,7 @@ void draw_text_shadowed(Font font, const char *text, Vector2 position, float fon
 }
 
 
-void reset_game(Game_State *game_state) {
+void reset_game(Game_State *game_state, View view) {
 	game_state->triumphant_player = -1;
 
 	game_state->title_alpha = 1.0f;
@@ -237,13 +236,13 @@ void reset_game(Game_State *game_state) {
 	game_state->active_rings = 0;
 
 	game_state->players[0] = (Player){
-		.position = { game_state->view.width * 2.0f/3.0f, game_state->view.height / 2.0f },
+		.position = { view.width * 2.0f/3.0f, view.height / 2.0f },
 		.health = PLAYER_STARTING_HEALTH,
 		.hit_animation_t = 1.0f,
 		.parameters = &game_state->player_parameters[0],
 	};
 	game_state->players[1] = (Player){
-		.position = { game_state->view.width * 1.0f/3.0f, game_state->view.height / 2.0f },
+		.position = { view.width * 1.0f/3.0f, view.height / 2.0f },
 		.health = PLAYER_STARTING_HEALTH,
 		.hit_animation_t = 1.0f,
 		.parameters = &game_state->player_parameters[1],
@@ -340,13 +339,12 @@ int main(void)
 	// InitWindow(2560, 1440, title);
 	InitWindow(1024, 768, title);
 	HideCursor();
-	// ToggleFullscreen();
-	// set_window_to_monitor_dimensions();
+	ToggleFullscreen();
 
 	Game_State *game_state = malloc(sizeof(*game_state));
 	assert(game_state);
 
-	View view = game_state->view = get_updated_view();
+	View view = get_updated_view();
 
 	Player_Parameters *player_parameters = game_state->player_parameters;
 
@@ -375,7 +373,7 @@ int main(void)
 
 	game_state->sound_win = LoadSound("resources/win.wav");
 
-	reset_game(game_state);
+	reset_game(game_state, view);
 
 	Font default_font = GetFontDefault();
 
@@ -389,23 +387,22 @@ int main(void)
 		float dt = GetFrameTime();
 		double current_time = GetTime();
 
-
 		// Update
 		//-----------------------------------------------------
 
 		if (IsKeyPressed(KEY_ENTER)) {
 			if (IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT)) {
 				ToggleFullscreen();  // modifies window size when scaling!
-				view = game_state->view = get_updated_view();
+				view = get_updated_view();
 			}
 			else {
-				reset_game(game_state);
+				reset_game(game_state, view);
 			}
 		}
 
-		if (IsWindowResized()) {
 
-			view = game_state->view = get_updated_view();
+		if (IsWindowResized()) {
+			view = get_updated_view();
 
 			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
 
