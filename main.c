@@ -36,6 +36,8 @@ typedef struct View {
 	float height;
 	float scale;
 	float inv_scale;
+	float screen_width;
+	float screen_height;
 } View;
 
 typedef struct Bullet {
@@ -51,6 +53,8 @@ typedef struct Player_Parameters
 	KeyboardKey key_right;
 	KeyboardKey key_up;
 	KeyboardKey key_down;
+	KeyboardKey key_action;
+	const char *key_text;
 	Sound sound_pop;
 	Sound sound_hit;
 	Color color;
@@ -160,6 +164,40 @@ void spawn_bullet_ring(Player *player, uint64_t *random_state) {
 	PlaySound(player->parameters->sound_pop);
 }
 
+void spawn_bullet_fan(Player *player) {
+	int count = player_compute_max_bullets(player);
+	float speed = 50.0f + Vector2LengthSqr(player->velocity)/400;
+
+	if (player->active_bullets + count > MAX_ACTIVE_BULLETS) {
+		count = MAX_ACTIVE_BULLETS - player->active_bullets;
+	}
+
+	player->energy -= count * BULLET_ENERGY_COST;
+
+	if (player->energy < 0) {
+		player->energy = 0.0f;
+	}
+
+	float angle_span = 2.0*PI / 36.0f;
+
+	float angle_quantum = angle_span / (float)count;
+
+
+	float angle = atan2(player->velocity.y, player->velocity.x) - 0.5f*angle_span + 0.5f*angle_quantum;
+
+	for (int i = 0; i < count; ++i) {
+		Bullet *bullet = &player->bullets[player->active_bullets + i];
+		bullet->position = player->position;
+		bullet->velocity = Vector2Scale((Vector2){cosf(angle), sinf(angle)}, speed);
+		bullet->time = 0;
+		angle += angle_quantum;
+	}
+
+	player->active_bullets += count;
+
+	PlaySound(player->parameters->sound_pop);
+}
+
 
 void spawn_ring(Game_State *game_state, Vector2 position, int player_index, float ring_angle) {
 
@@ -216,20 +254,33 @@ void set_window_to_monitor_dimensions(void) {
 	int monitor_index = GetCurrentMonitor();
 	int monitor_width = GetMonitorWidth(monitor_index);
 	int monitor_height = GetMonitorHeight(monitor_index);
+	fprintf(stderr, "Monitor (%d): %d x %d\n", monitor_index, monitor_width, monitor_height);
 	SetWindowSize(monitor_width, monitor_height);
 }
 
-View get_view(void) {
+View get_updated_view(void) {
 
 	View result;
 
-	float screen_width = GetScreenWidth();
-	float screen_height = GetScreenHeight();
+	float width;
+	float height;
 
-	result.scale = 0.5f*(screen_width/1440.0f + screen_height/900.0f);
+	if (IsWindowFullscreen()) {
+		int monitor = GetCurrentMonitor();
+		width = (float)GetMonitorWidth(monitor);
+		height = (float)GetMonitorHeight(monitor);
+	}
+	else {
+		width = GetScreenWidth();
+		height = GetScreenHeight();
+	}
+
+	result.scale = 0.5f*(width/1440.0f + height/900.0f);
 	result.inv_scale = 1.0f/result.scale;
-	result.width = screen_width*result.inv_scale;
-	result.height = screen_height*result.inv_scale;
+	result.width = width*result.inv_scale;
+	result.height = height*result.inv_scale;
+	result.screen_width = width;
+	result.screen_height = height;
 	return result;
 }
 
@@ -285,16 +336,17 @@ int main(void)
 
 	// Set configuration flags for window creation
 	SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
-	InitWindow(1920, 1080, title);
 
-	set_window_to_monitor_dimensions();
-	ToggleFullscreen();
+	// InitWindow(2560, 1440, title);
+	InitWindow(1024, 768, title);
 	HideCursor();
+	// ToggleFullscreen();
+	// set_window_to_monitor_dimensions();
 
 	Game_State *game_state = malloc(sizeof(*game_state));
 	assert(game_state);
 
-	View view = game_state->view = get_view();
+	View view = game_state->view = get_updated_view();
 
 	Player_Parameters *player_parameters = game_state->player_parameters;
 
@@ -303,6 +355,8 @@ int main(void)
 		.key_right = KEY_RIGHT,
 		.key_up = KEY_UP,
 		.key_down = KEY_DOWN,
+		.key_action = KEY_RIGHT_SHIFT,
+		.key_text = "Arrow Keys + Right Shift",
 		.sound_pop = LoadSound("resources/player_1_pop.wav"),
 		.sound_hit = LoadSound("resources/player_1_hit.wav"),
 		.color = (Color){240, 120, 0, 255},
@@ -312,6 +366,8 @@ int main(void)
 		.key_right = KEY_D,
 		.key_up = KEY_W,
 		.key_down = KEY_S,
+		.key_action = KEY_LEFT_SHIFT,
+		.key_text = "W,A,S,D + Left Shift",
 		.sound_pop = LoadSound("resources/player_2_pop.wav"),
 		.sound_hit = LoadSound("resources/player_2_hit.wav"),
 		.color = (Color){0, 120, 240, 255},
@@ -323,7 +379,6 @@ int main(void)
 
 	Font default_font = GetFontDefault();
 
-
 	SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
 	//----------------------------------------------------------
 
@@ -334,15 +389,14 @@ int main(void)
 		float dt = GetFrameTime();
 		double current_time = GetTime();
 
+
 		// Update
 		//-----------------------------------------------------
 
 		if (IsKeyPressed(KEY_ENTER)) {
 			if (IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT)) {
-				if (!IsWindowFullscreen()) {
-					set_window_to_monitor_dimensions();
-				}
 				ToggleFullscreen();  // modifies window size when scaling!
+				view = game_state->view = get_updated_view();
 			}
 			else {
 				reset_game(game_state);
@@ -351,7 +405,7 @@ int main(void)
 
 		if (IsWindowResized()) {
 
-			view = game_state->view = get_view();
+			view = game_state->view = get_updated_view();
 
 			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
 
@@ -400,6 +454,10 @@ int main(void)
 				if (IsKeyDown(parameters->key_right)) player_movement_control.x += 1.0f;
 				if (IsKeyDown(parameters->key_up)) player_movement_control.y = -1.0f;
 				if (IsKeyDown(parameters->key_down)) player_movement_control.y += 1.0f;
+
+				if (IsKeyReleased(parameters->key_action)) {
+					spawn_bullet_fan(player);
+				}
 
 				float friction_fraction = 1.0f;
 
@@ -641,11 +699,10 @@ int main(void)
 
 		BeginDrawing();
 
-		float screen_width = GetScreenWidth();
-		float screen_height = GetScreenHeight();
-
-
 		ClearBackground((Color){255, 255, 255, 255});
+
+		float screen_width = view.screen_width;
+		float screen_height = view.screen_height;
 
 		//
 		// Draw Title
@@ -802,7 +859,7 @@ int main(void)
 
 						Color controls_color = parameters->color;
 
-						const char *text = (const char *[]){"Arrow Keys", "W, A, S, D"}[player_index];
+						const char *text = parameters->key_text;
 
 						font_size = 30.0f*view.scale;
 						font_spacing = font_size*FONT_SPACING_FOR_SIZE;
