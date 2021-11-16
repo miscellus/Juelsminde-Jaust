@@ -63,6 +63,7 @@ typedef struct Player_Parameters
 typedef struct Player {
 	Vector2 position;
 	Vector2 velocity;
+	float shoot_angle;
 	int health;
 	float energy;
 	double controls_text_timeout;
@@ -163,9 +164,7 @@ void spawn_bullet_ring(Player *player, uint64_t *random_state) {
 	PlaySound(player->parameters->sound_pop);
 }
 
-void spawn_bullet_fan(Player *player) {
-	int count = player_compute_max_bullets(player);
-	float speed = 50.0f + Vector2LengthSqr(player->velocity)/400;
+void spawn_bullet_fan(Player *player, int count, float speed) {
 
 	if (player->active_bullets + count > MAX_ACTIVE_BULLETS) {
 		count = MAX_ACTIVE_BULLETS - player->active_bullets;
@@ -181,8 +180,7 @@ void spawn_bullet_fan(Player *player) {
 
 	float angle_quantum = angle_span / (float)count;
 
-
-	float angle = atan2(player->velocity.y, player->velocity.x) - 0.5f*angle_span + 0.5f*angle_quantum;
+	float angle = player->shoot_angle - 0.5f*angle_span + 0.5f*angle_quantum;
 
 	for (int i = 0; i < count; ++i) {
 		Bullet *bullet = &player->bullets[player->active_bullets + i];
@@ -281,6 +279,42 @@ View get_updated_view(void) {
 	result.screen_width = width;
 	result.screen_height = height;
 	return result;
+}
+
+float lerp_angle(float a, float b, float t) {
+	// From https://gist.github.com/itsmrpeck/be41d72e9d4c72d2236de687f6f53974
+
+    float result;
+
+    float angle_difference = b - a;
+
+    if (angle_difference < -PI)
+    {
+        // lerp upwards past 2*PI
+        b += 2*PI;
+        result = Lerp(a, b, t);
+        if (result >= 2*PI)
+        {
+            result -= 2*PI;
+        }
+    }
+    else if (angle_difference > PI)
+    {
+        // lerp downwards past 0
+        b -= 2*PI;
+        result = Lerp(a, b, t);
+        if (result < 0.f)
+        {
+            result += 2*PI;
+        }
+    }
+    else
+    {
+        // straight lerp
+        result = Lerp(a, b, t);
+    }
+
+    return result;
 }
 
 int main(void)
@@ -443,32 +477,58 @@ int main(void)
 				Player *player = game_state->players + player_index;
 				
 				
-				Vector2 player_movement_control = {0.0f, 0.0f};
+				Vector2 control = {0.0f, 0.0f};
 
 				Player_Parameters *parameters = player->parameters;
 
-				if (IsKeyDown(parameters->key_left)) player_movement_control.x = -1.0f;
-				if (IsKeyDown(parameters->key_right)) player_movement_control.x += 1.0f;
-				if (IsKeyDown(parameters->key_up)) player_movement_control.y = -1.0f;
-				if (IsKeyDown(parameters->key_down)) player_movement_control.y += 1.0f;
-
-				if (IsKeyReleased(parameters->key_action)) {
-					spawn_bullet_fan(player);
-				}
+				if (IsKeyDown(parameters->key_left))  control.x  = -1.0f;
+				if (IsKeyDown(parameters->key_right)) control.x +=  1.0f;
+				if (IsKeyDown(parameters->key_up))    control.y  = -1.0f;
+				if (IsKeyDown(parameters->key_down))  control.y +=  1.0f;
 
 				float friction_fraction = 1.0f;
 
-				if (player_movement_control.x == 0.0f && player_movement_control.y == 0.0f) {
+				if (control.x == 0.0f && control.y == 0.0f) {
 					friction_fraction = 0.1f;
 				}
 				else {
-					// Normalize player movement controls
-					player_movement_control = Vector2Scale(player_movement_control, INV_SQRT_TWO);
+
+					float control_angle = ((float[3][3]){
+						{-2.356194490192345f, 3.141592653589793f, 2.356194490192345f},
+						{-1.5707963267948966f, 0.0f, 1.5707963267948966f},
+						{-0.7853981633974483f, 0.0f, 0.7853981633974483f}
+					})[(int)control.x+1][(int)control.y+1];
+
+					if (control.x != 0.0f && control.y != 0.0f) {
+						// Normalize player movement controls
+						control = Vector2Scale(control, INV_SQRT_TWO);
+					}
+
+					player->shoot_angle = lerp_angle(player->shoot_angle, control_angle, 3.0f * dt);
 				}
 
-				Vector2 acceleration = Vector2Scale(player_movement_control, PLAYER_ACCELERATION_FORCE * dt);
+				Vector2 acceleration = Vector2Scale(control, PLAYER_ACCELERATION_FORCE * dt);
 
 				acceleration = Vector2Subtract(acceleration, Vector2Scale(player->velocity, PLAYER_FRICTION * friction_fraction * dt));
+
+				if (IsKeyReleased(parameters->key_action)) {
+
+					float speed = Vector2Length(player->velocity);
+
+					Vector2 shoot_vector = (Vector2){cosf(player->shoot_angle), sinf(player->shoot_angle)};
+
+					float factor = Vector2DotProduct(shoot_vector, Vector2Scale(player->velocity, 1.0f/speed));
+
+					if (factor < 0) {
+						factor = 0;
+					}
+
+					int count = player_compute_max_bullets(player);
+
+					spawn_bullet_fan(player, count, speed);
+
+					acceleration = Vector2Add(acceleration, Vector2Scale(shoot_vector, -speed*factor));
+				}
 
 				player->velocity = Vector2Add(player->velocity, acceleration);
 			}
@@ -619,7 +679,7 @@ int main(void)
 
 				float speed = Vector2Length(player->velocity);
 
-				player->energy += speed * dt / (player->energy*1.0f + 1.0f);
+				player->energy += speed * dt / (player->energy*2.0f + 1.0f);
 
 				if (player->hit_animation_t < 1.0f) {
 					player->hit_animation_t += dt*4.0f;
@@ -843,6 +903,25 @@ int main(void)
 
 				draw_text_shadowed(default_font, health_text_string, health_text_position, font_size, font_spacing, WHITE, BLACK);
 			}
+
+			// Draw player's move direction arrow
+			{
+				Vector2 spot = (Vector2){cosf(player->shoot_angle), sinf(player->shoot_angle)};
+				spot = Vector2Scale(spot, player_radius);
+				spot = Vector2Add(spot, player_screen_position);
+				DrawCircleV(spot, player_radius*0.2f, parameters->color);
+			}
+		}
+
+		for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
+			Player *player = game_state->players + player_index;
+			Player_Parameters *parameters = player->parameters;
+
+			float player_radius = radius_from_energy(player->energy)*view.scale;
+			float font_size = player_radius*1.0f;
+			float font_spacing = font_size*FONT_SPACING_FOR_SIZE;
+
+			Vector2 player_screen_position = Vector2Scale(player->position, view.scale);
 
 			// Draw player's controls
 			{
