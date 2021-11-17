@@ -20,7 +20,7 @@
 #define BULLET_TIME_BEGIN_FADE (BULLET_TIME_END_FADE-0.4f)
 
 #define PLAYER_STARTING_HEALTH 30
-#define PLAYER_MINIMUM_RADIUS 30.0f   
+#define PLAYER_MINIMUM_RADIUS 40.0f
 #define PLAYER_ACCELERATION_FORCE 1100.0f
 #define PLAYER_FRICTION 0.94f
 
@@ -236,12 +236,14 @@ void reset_game(Game_State *game_state, View view) {
 
 	game_state->players[0] = (Player){
 		.position = { view.width * 2.0f/3.0f, view.height / 2.0f },
+		.shoot_angle = PI,
 		.health = PLAYER_STARTING_HEALTH,
 		.hit_animation_t = 1.0f,
 		.parameters = &game_state->player_parameters[0],
 	};
 	game_state->players[1] = (Player){
 		.position = { view.width * 1.0f/3.0f, view.height / 2.0f },
+		.shoot_angle = 0.0f,
 		.health = PLAYER_STARTING_HEALTH,
 		.hit_animation_t = 1.0f,
 		.parameters = &game_state->player_parameters[1],
@@ -721,7 +723,16 @@ int main(void)
 						if (bullet_overlaps_opponent) {
 							--opponent->health;
 
-							float ring_angle = (180+90)-Vector2Angle(bullet_position, opponent->position);
+							Vector2 diff = Vector2Subtract(bullet_position, opponent->position);
+
+							diff = Vector2NormalizeOrZero(diff);
+
+							float bullet_mass = 0.5f;
+							float bullet_speed = Vector2Length(bullet->velocity);
+
+							opponent->velocity = Vector2Subtract(opponent->velocity, Vector2Scale(diff, bullet_mass*bullet_speed));
+
+							float ring_angle = atan2f(diff.x, diff.y)*(180.0f/PI);
 
 							PlaySound(opponent->parameters->sound_hit);
 							spawn_ring(game_state, bullet_position, player_index, ring_angle);
@@ -863,14 +874,32 @@ int main(void)
 			Player *player = game_state->players + player_index;
 			Player_Parameters *parameters = player->parameters;
 
-			float player_radius = radius_from_energy(player->energy)*view.scale;
-			float font_size = player_radius*1.0f;
+			float player_radius = radius_from_energy(player->energy);
+			float player_radius_screen = player_radius*view.scale;
+			float font_size = player_radius_screen*1.0f;
 			float font_spacing = font_size*FONT_SPACING_FOR_SIZE;
 
-			Vector2 player_screen_position = Vector2Scale(player->position, view.scale);
+			Vector2 player_position_screen = Vector2Scale(player->position, view.scale);
 
 			// Draw player's body
-			DrawCircleV(player_screen_position, player_radius, parameters->color);
+			DrawCircleV(player_position_screen, player_radius_screen, parameters->color);
+
+			// Draw player's move direction arrow
+			{
+				Vector2 arrow_point = (Vector2){cosf(player->shoot_angle), sinf(player->shoot_angle)};
+				Vector2 arrow_left = (Vector2){cosf(player->shoot_angle - 0.25f*PI), sinf(player->shoot_angle - 0.25f*PI)};
+				Vector2 arrow_right = (Vector2){cosf(player->shoot_angle + 0.25f*PI), sinf(player->shoot_angle + 0.25f*PI)};
+				arrow_point = Vector2Scale(arrow_point, view.scale*(player_radius*1.25f + 0.1f));
+				arrow_left = Vector2Scale(arrow_left, player_radius_screen);
+				arrow_right = Vector2Scale(arrow_right, player_radius_screen);
+
+				arrow_point = Vector2Add(arrow_point, player_position_screen);
+				arrow_left = Vector2Add(arrow_left, player_position_screen);
+				arrow_right = Vector2Add(arrow_right, player_position_screen);
+				// DrawCircleV(spot, player_radius*0.2f, parameters->color);
+
+				DrawTriangle(arrow_right, arrow_point, arrow_left, parameters->color);
+			}
 
 			// Draw player's health text
 			{
@@ -886,17 +915,9 @@ int main(void)
 
 				Vector2 health_text_bounds = MeasureTextEx(default_font, health_text_string, font_size, font_spacing);
 
-				Vector2 health_text_position = Vector2Add(player_screen_position, Vector2Scale(health_text_bounds, -0.5f));
+				Vector2 health_text_position = Vector2Add(player_position_screen, Vector2Scale(health_text_bounds, -0.5f));
 
 				draw_text_shadowed(default_font, health_text_string, health_text_position, font_size, font_spacing, WHITE, BLACK);
-			}
-
-			// Draw player's move direction arrow
-			{
-				Vector2 spot = (Vector2){cosf(player->shoot_angle), sinf(player->shoot_angle)};
-				spot = Vector2Scale(spot, player_radius);
-				spot = Vector2Add(spot, player_screen_position);
-				DrawCircleV(spot, player_radius*0.2f, parameters->color);
 			}
 		}
 
@@ -911,15 +932,15 @@ int main(void)
 
 			float t1 = 1.0f - ring.t;
 			float t2 = ring.t;
-			t1 = 1.0f - t1*t1*t1;
+			t1 = 1.0f - t1*t1;
 
 			float ring_radius = 120.0f;
 
 			float outer_radius = t1*ring_radius*view.scale;
 			float inner_radius = t2*ring_radius*view.scale;
 
-			float start_angle = ring.angle - 45.0;
-			float end_angle = ring.angle + 45.0f;
+			float start_angle = ring.angle - 60.0;
+			float end_angle = ring.angle + 60.0f;
 
 			ring.position = Vector2Scale(ring.position, view.scale);
 
