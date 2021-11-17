@@ -69,6 +69,7 @@ typedef struct Player {
 	double controls_text_timeout;
 	double shoot_time_out;
 	float hit_animation_t;
+	float shoot_charge_t;
 #define MAX_ACTIVE_BULLETS 2048
 	int active_bullets;
 	Bullet bullets[MAX_ACTIVE_BULLETS];
@@ -165,7 +166,7 @@ void spawn_bullet_ring(Player *player, uint64_t *random_state) {
 	PlaySound(player->parameters->sound_pop);
 }
 
-void spawn_bullet_fan(Player *player, int count, float speed) {
+void spawn_bullet_fan(Player *player, int count, float speed, float angle_span) {
 
 	if (player->active_bullets + count > MAX_ACTIVE_BULLETS) {
 		count = MAX_ACTIVE_BULLETS - player->active_bullets;
@@ -177,16 +178,17 @@ void spawn_bullet_fan(Player *player, int count, float speed) {
 		player->energy = 0.0f;
 	}
 
-	float angle_span = 2.0*PI / 36.0f;
-
 	float angle_quantum = angle_span / (float)count;
 
 	float angle = player->shoot_angle - 0.5f*angle_span + 0.5f*angle_quantum;
+
+	Vector2 quater_player_velocity = Vector2Scale(player->velocity, 0.25f);
 
 	for (int i = 0; i < count; ++i) {
 		Bullet *bullet = &player->bullets[player->active_bullets + i];
 		bullet->position = player->position;
 		bullet->velocity = Vector2Scale((Vector2){cosf(angle), sinf(angle)}, speed);
+		bullet->velocity = Vector2Add(bullet->velocity, quater_player_velocity);
 		bullet->time = 0;
 		angle += angle_quantum;
 	}
@@ -515,28 +517,53 @@ int main(void)
 
 				acceleration = Vector2Subtract(acceleration, Vector2Scale(player->velocity, PLAYER_FRICTION * friction_fraction * dt));
 
-				if (
-					IsKeyPressed(parameters->key_action) &&
-					(player->velocity.x || player->velocity.y) &&
-					(player->shoot_time_out < current_time)
-				) {
+				//
+				// Shooting:
+				//
+				if (player->shoot_time_out < current_time) {
 
-					player->shoot_time_out = current_time + 1.0f;
-					float speed = Vector2Length(player->velocity);
-
-					Vector2 shoot_vector = (Vector2){cosf(player->shoot_angle), sinf(player->shoot_angle)};
-
-					float factor = Vector2DotProduct(shoot_vector, Vector2Scale(player->velocity, 1.0f/speed));
-
-					if (factor < 0) {
-						factor = 0;
+					if (IsKeyDown(parameters->key_action) && player->shoot_charge_t < 1.0f) {
+						float full_charges_per_second = 1.5f;
+						player->shoot_charge_t += full_charges_per_second * dt;
+						if (player->shoot_charge_t > 1.0f) {
+							player->shoot_charge_t = 1.0f;
+						}
 					}
+					else if (IsKeyReleased(parameters->key_action)) {
+						float shoot_cooldown_seconds = 1.0f;
+						player->shoot_time_out = current_time + shoot_cooldown_seconds;
 
-					int count = player_compute_max_bullets(player);
+						float t = player->shoot_charge_t;
+						float speed = 50.0f + 650.0f*player->shoot_charge_t;
+						float angle_span;
+						{
+							float narrow_angle_span = 2.0*PI / 60.0f;
+							float wide_angle_span = 2.0*PI / 4.0f;
+							angle_span = (1.0f-t)*wide_angle_span + t*narrow_angle_span;
+						}
 
-					spawn_bullet_fan(player, count, speed);
+						// speed *= 1.0f + player->shoot_charge_t * 2.5f;
 
-					acceleration = Vector2Subtract(acceleration, Vector2Scale(shoot_vector, speed*factor));
+						Vector2 shoot_vector = (Vector2){cosf(player->shoot_angle), sinf(player->shoot_angle)};
+
+						float recoil_factor = Vector2DotProduct(shoot_vector, Vector2NormalizeOrZero(player->velocity));
+
+						if (recoil_factor < 0) {
+							recoil_factor = 0;
+						}
+
+						int count = player_compute_max_bullets(player);
+
+						spawn_bullet_fan(player, count, speed, angle_span);
+
+						acceleration = Vector2Subtract(acceleration, Vector2Scale(shoot_vector, speed*recoil_factor));
+					}
+					else if (IsKeyUp(parameters->key_action) && player->shoot_charge_t > 0.0f) {
+						player->shoot_charge_t -= dt;
+						if (player->shoot_charge_t < 0.0f) {
+							player->shoot_charge_t = 0.0f;
+						}
+					}
 				}
 
 				player->velocity = Vector2Add(player->velocity, acceleration);
@@ -727,7 +754,7 @@ int main(void)
 
 							diff = Vector2NormalizeOrZero(diff);
 
-							float bullet_mass = 0.5f;
+							float bullet_mass = 0.25f;
 							float bullet_speed = Vector2Length(bullet->velocity);
 
 							opponent->velocity = Vector2Subtract(opponent->velocity, Vector2Scale(diff, bullet_mass*bullet_speed));
@@ -886,13 +913,29 @@ int main(void)
 
 			// Draw player's move direction arrow
 			{
+
+
+				float angle_offset;
+				float pointiness;
+				{
+					float t = player->shoot_charge_t;
+					if (t > 1.0f) t = 1.0f;
+
+					float narrow_angle_offset = 2.0f*PI / 24.0f;
+					float wide_angle_offset = 2.0f*PI / 7.0f;
+				 	angle_offset = (1.0f-t)*wide_angle_offset + t*narrow_angle_offset;
+				 	pointiness = (1.0f-t)*15.0f + t*50.0f;
+				}
+
+				float angle1 = player->shoot_angle - angle_offset;
+				float angle2 = player->shoot_angle + angle_offset;
+
 				Vector2 arrow_point = (Vector2){cosf(player->shoot_angle), sinf(player->shoot_angle)};
-				Vector2 arrow_left = (Vector2){cosf(player->shoot_angle - 0.25f*PI), sinf(player->shoot_angle - 0.25f*PI)};
-				Vector2 arrow_right = (Vector2){cosf(player->shoot_angle + 0.25f*PI), sinf(player->shoot_angle + 0.25f*PI)};
-				arrow_point = Vector2Scale(arrow_point, view.scale*(player_radius*1.25f + 0.1f));
+				Vector2 arrow_left = (Vector2){cosf(angle1), sinf(angle1)};
+				Vector2 arrow_right = (Vector2){cosf(angle2), sinf(angle2)};
+				arrow_point = Vector2Scale(arrow_point, view.scale*(player_radius + pointiness));
 				arrow_left = Vector2Scale(arrow_left, player_radius_screen);
 				arrow_right = Vector2Scale(arrow_right, player_radius_screen);
-
 				arrow_point = Vector2Add(arrow_point, player_position_screen);
 				arrow_left = Vector2Add(arrow_left, player_position_screen);
 				arrow_right = Vector2Add(arrow_right, player_position_screen);
