@@ -67,6 +67,7 @@ typedef struct Player {
 	int health;
 	float energy;
 	double controls_text_timeout;
+	double shoot_time_out;
 	float hit_animation_t;
 #define MAX_ACTIVE_BULLETS 2048
 	int active_bullets;
@@ -493,10 +494,11 @@ int main(void)
 				}
 				else {
 
+					// NOTE(jakob): atan2 lookup table
 					float control_angle = ((float[3][3]){
 						{-2.356194490192345f, 3.141592653589793f, 2.356194490192345f},
 						{-1.5707963267948966f, 0.0f, 1.5707963267948966f},
-						{-0.7853981633974483f, 0.0f, 0.7853981633974483f}
+						{-0.7853981633974483f, 0.0f, 0.7853981633974483f},
 					})[(int)control.x+1][(int)control.y+1];
 
 					if (control.x != 0.0f && control.y != 0.0f) {
@@ -511,8 +513,13 @@ int main(void)
 
 				acceleration = Vector2Subtract(acceleration, Vector2Scale(player->velocity, PLAYER_FRICTION * friction_fraction * dt));
 
-				if (IsKeyReleased(parameters->key_action)) {
+				if (
+					IsKeyPressed(parameters->key_action) &&
+					(player->velocity.x || player->velocity.y) &&
+					(player->shoot_time_out < current_time)
+				) {
 
+					player->shoot_time_out = current_time + 1.0f;
 					float speed = Vector2Length(player->velocity);
 
 					Vector2 shoot_vector = (Vector2){cosf(player->shoot_angle), sinf(player->shoot_angle)};
@@ -527,7 +534,7 @@ int main(void)
 
 					spawn_bullet_fan(player, count, speed);
 
-					acceleration = Vector2Add(acceleration, Vector2Scale(shoot_vector, -speed*factor));
+					acceleration = Vector2Subtract(acceleration, Vector2Scale(shoot_vector, speed*factor));
 				}
 
 				player->velocity = Vector2Add(player->velocity, acceleration);
@@ -784,32 +791,16 @@ int main(void)
 			text_position = Vector2Add((Vector2){screen_width/2.0f, screen_height* 2.0f/3.0f}, Vector2Scale(text_bounds, -0.5f));
 
 			DrawTextEx(default_font, author, text_position, font_size, font_spacing, title_color);
-		}
 
+			const char *website = "www.miscellus.com";
+			font_size *= 0.75f;
+			font_spacing *= 0.75f;
 
-		//
-		// Draw rings
-		//
-		for (int ring_index = 0; ring_index < game_state->active_rings; ++ring_index) {
-			
-			Ring ring = game_state->rings[ring_index];
+			text_bounds = MeasureTextEx(default_font, website, font_size, font_spacing);
+			text_position.x = 0.5f*(screen_width - text_bounds.x);
+			text_position.y += 2.0f*text_bounds.y;
 
-			Color ring_color = game_state->player_parameters[ring.player_index].color;
-
-			float t1 = 1.0f - ring.t;
-			float t2 = ring.t;
-			t1 = 1.0f - t1*t1*t1;
-
-
-			float outer_radius = t1*100.0f*view.scale;
-			float inner_radius = t2*100.0f*view.scale;
-
-			float start_angle = ring.angle - 60.0;
-			float end_angle = ring.angle + 60.0f;
-
-			ring.position = Vector2Scale(ring.position, view.scale);
-
-			DrawRing(ring.position, inner_radius, outer_radius, start_angle, end_angle, 10, ring_color);
+			DrawTextEx(default_font, website, text_position, font_size, font_spacing, title_color);
 		}
 
 		//
@@ -825,14 +816,10 @@ int main(void)
 
 				Bullet *bullet = &player->bullets[bullet_index];
 
-
-
 				float s = bullet->time < 0.3f ? bullet->time/0.3f : 1.0f;
 
 				Vector2 direction = Vector2Scale(bullet->velocity, -0.2f*s);
-
 				Vector2 point_tail = Vector2Add(bullet->position, direction);
-
 				Vector2 tail_to_position_difference = Vector2Subtract(bullet->position, point_tail);
 
 				float mid_circle_radius = 0.5f*Vector2Length(tail_to_position_difference);
@@ -913,45 +900,72 @@ int main(void)
 			}
 		}
 
+		//
+		// Draw explosion rings
+		//
+		for (int ring_index = 0; ring_index < game_state->active_rings; ++ring_index) {
+
+			Ring ring = game_state->rings[ring_index];
+
+			Color ring_color = game_state->player_parameters[ring.player_index].color;
+
+			float t1 = 1.0f - ring.t;
+			float t2 = ring.t;
+			t1 = 1.0f - t1*t1*t1;
+
+			float ring_radius = 120.0f;
+
+			float outer_radius = t1*ring_radius*view.scale;
+			float inner_radius = t2*ring_radius*view.scale;
+
+			float start_angle = ring.angle - 45.0;
+			float end_angle = ring.angle + 45.0f;
+
+			ring.position = Vector2Scale(ring.position, view.scale);
+
+			DrawRing(ring.position, inner_radius, outer_radius, start_angle, end_angle, 10, ring_color);
+		}
+
+		//
+		// Draw player controls
+		//
+
 		for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
 			Player *player = game_state->players + player_index;
 			Player_Parameters *parameters = player->parameters;
 
-			float player_radius = radius_from_energy(player->energy)*view.scale;
-			float font_size = player_radius*1.0f;
-			float font_spacing = font_size*FONT_SPACING_FOR_SIZE;
 
 			Vector2 player_screen_position = Vector2Scale(player->position, view.scale);
 
-			// Draw player's controls
-			{
-				float player_speed = Vector2Length(player->velocity);
+			float player_speed = Vector2Length(player->velocity);
 
-				float max_speed_while_drawing_control_text = 4000.0f*dt;
+			float max_speed_while_drawing_control_text = 400.0f;
 
-				if (player_speed <= max_speed_while_drawing_control_text) {
+			if (player_speed <= max_speed_while_drawing_control_text) {
+				if (player->controls_text_timeout < current_time) {
 
-					if (player->controls_text_timeout < current_time) {
+					float player_radius = radius_from_energy(player->energy)*view.scale;
+					float font_size = player_radius*1.0f;
+					float font_spacing = font_size*FONT_SPACING_FOR_SIZE;
 
-						Color controls_color = parameters->color;
+					Color controls_color = parameters->color;
 
-						const char *text = parameters->key_text;
+					const char *text = parameters->key_text;
 
-						font_size = 30.0f*view.scale;
-						font_spacing = font_size*FONT_SPACING_FOR_SIZE;
+					font_size = 30.0f*view.scale;
+					font_spacing = font_size*FONT_SPACING_FOR_SIZE;
 
-						Vector2 text_bounds = MeasureTextEx(default_font, text, font_size, font_spacing);
+					Vector2 text_bounds = MeasureTextEx(default_font, text, font_size, font_spacing);
 
-						Vector2 text_position = Vector2Add(player_screen_position, Vector2Scale(text_bounds, -0.5f));
+					Vector2 text_position = Vector2Add(player_screen_position, Vector2Scale(text_bounds, -0.5f));
 
-						text_position.y -= player_radius + font_size;
+					text_position.y -= player_radius + font_size;
 
-						DrawTextEx(default_font, text, text_position, font_size, font_spacing, controls_color);
-					}
+					DrawTextEx(default_font, text, text_position, font_size, font_spacing, controls_color);
 				}
-				else {
-					player->controls_text_timeout = current_time + 2.0;
-				}
+			}
+			else {
+				player->controls_text_timeout = current_time + 2.0;
 			}
 		}
 
