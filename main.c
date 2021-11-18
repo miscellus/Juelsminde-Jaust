@@ -557,12 +557,8 @@ int main(void)
 						spawn_bullet_fan(player, count, speed, angle_span);
 
 						acceleration = Vector2Subtract(acceleration, Vector2Scale(shoot_vector, speed*recoil_factor));
-					}
-					else if (IsKeyUp(parameters->key_action) && player->shoot_charge_t > 0.0f) {
-						player->shoot_charge_t -= dt;
-						if (player->shoot_charge_t < 0.0f) {
-							player->shoot_charge_t = 0.0f;
-						}
+
+						player->shoot_charge_t = 0.0f;
 					}
 				}
 
