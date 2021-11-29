@@ -97,10 +97,13 @@ typedef struct Ring {
 
 enum Menu_Item_Type {
 	MENU_ITEM_LABEL = 0,
-	MENU_ITEM_ACTION_PLAY,
+	MENU_ITEM_ACTION_NEW_GAME,
+	MENU_ITEM_ACTION_CONTINUE,
 	MENU_ITEM_BOOL,
 	MENU_ITEM_INT,
 	MENU_ITEM_FLOAT,
+	MENU_ITEM_MENU,
+	MENU_ITEM_MENU_BACK,
 	MENU_ITEM_ACTION_QUIT,
 };
 
@@ -111,8 +114,16 @@ typedef struct Menu_Item {
 		int *int_ref;
 		float *float_ref;
 		bool *bool_ref;
+		struct Menu *menu_ref;
 	} u;
 } Menu_Item;
+
+typedef struct Menu {
+	struct Menu *parent;
+	Menu_Item *items;
+	unsigned int item_count;
+	unsigned int selected_index;
+} Menu;
 
 typedef struct Game_State {
 	bool running;
@@ -120,10 +131,7 @@ typedef struct Game_State {
 	Sound sound_win;
 	int triumphant_player;
 	float title_alpha;
-	Menu_Item *menu;
-	unsigned int menu_item_count;
-	unsigned int selected_menu_item;
-	double menu_item_cooldown;
+	bool game_in_progress;
 	float game_play_time;
 #define NUM_PLAYERS 2
 	Player players[NUM_PLAYERS];
@@ -140,7 +148,7 @@ float calculate_player_radius(Player *player) {
 
 bool hit_is_hard_enough(float hit) {
 
-	return 10000.0f <= fabs(hit);
+	return 200.0f <= fabs(hit);
 }
 
 
@@ -268,6 +276,7 @@ void reset_game(Game_State *game_state, View view) {
 	game_state->title_alpha = 1.0f;
 	game_state->active_rings = 0;
 	game_state->game_play_time = 0.0f;
+	game_state->game_in_progress = true;
 
 	Player *p1 = &game_state->players[0];
 	memset(p1, 0, (char *)&p1->params - (char *)p1);
@@ -409,8 +418,8 @@ int main(void)
 		p->key_right = KEY_RIGHT;
 		p->key_up = KEY_UP;
 		p->key_down = KEY_DOWN;
-		p->key_action = KEY_RIGHT_SHIFT;
-		p->key_text = "Arrow Keys + Right Shift";
+		p->key_action = KEY_RIGHT_CONTROL;
+		p->key_text = "Arrow Keys + Right CTRL";
 		p->sound_pop = LoadSound("resources/player_1_pop.wav");
 		p->sound_hit = LoadSound("resources/player_1_hit.wav");
 		p->color = (Color){240.0f, 120.0f, 0.0f, 255.0f};
@@ -422,29 +431,39 @@ int main(void)
 		p->key_right = KEY_D;
 		p->key_up = KEY_W;
 		p->key_down = KEY_S;
-		p->key_action = KEY_LEFT_SHIFT;
-		p->key_text = "W,A,S,D + Left Shift";
+		p->key_action = KEY_LEFT_CONTROL;
+		p->key_text = "W,A,S,D + Left CTRL";
 		p->sound_pop = LoadSound("resources/player_2_pop.wav");
 		p->sound_hit = LoadSound("resources/player_2_hit.wav");
 		p->color = (Color){0.0f, 120.0f, 240.0f, 255.0f};
 	}
 	game_state->sound_win = LoadSound("resources/win.wav");
 
-	Menu_Item menu[] = {
-		{MENU_ITEM_ACTION_PLAY, "Play", .u = {0}},
-		{MENU_ITEM_INT, "Orange Player Health", .u.int_ref = &game_state->players[0].params.starting_health},
-		{MENU_ITEM_INT, "Blue Player Health", .u.int_ref= &game_state->players[1].params.starting_health},
+	Menu main_menu = {0};
+	Menu options_menu = {0};
+
+	main_menu.item_count = 4;
+	main_menu.items = (Menu_Item []) {
+		{MENU_ITEM_ACTION_CONTINUE, "Continue", .u = {0}},
+		{MENU_ITEM_ACTION_NEW_GAME, "New Game", .u = {0}},
+		{MENU_ITEM_MENU, "Options", .u.menu_ref = &options_menu},
 		{MENU_ITEM_ACTION_QUIT, "Quit", .u = {0}},
 	};
-	unsigned int menu_item_count = sizeof(menu)/sizeof(*menu);
 
-	game_state->menu = menu;
-	game_state->menu_item_count = menu_item_count;
+	options_menu.item_count = 3;
+	options_menu.items = (Menu_Item []){
+		{MENU_ITEM_MENU_BACK, "Back", .u = {0}},
+		{MENU_ITEM_INT, "Orange Player Health", .u.int_ref = &game_state->players[0].params.starting_health},
+		{MENU_ITEM_INT, "Blue Player Health", .u.int_ref= &game_state->players[1].params.starting_health},
+	};
+
+	Menu *menu = &main_menu;
+	float menu_item_cooldown = 0.0f;
 
 	View view = get_updated_view();
 
 	reset_game(game_state, view);
-	game_state->show_menu = true;
+	game_state->show_menu = false;
 
 	Font default_font = GetFontDefault();
 
@@ -475,7 +494,19 @@ int main(void)
 		}
 
 		if (IsKeyPressed(KEY_ESCAPE)) {
-			game_state->show_menu = !game_state->show_menu;
+			if (game_state->show_menu) {
+				Menu *parent = menu->parent;
+				if (parent) {
+					menu = menu->parent;
+				}
+				else {
+					game_state->show_menu = false;
+				}
+			}
+			else {
+				game_state->show_menu = true;
+				menu = &main_menu;
+			}
 		}
 
 		if (WindowShouldClose()) {
@@ -521,7 +552,7 @@ int main(void)
 			}
 		}
 
-		if (!game_state->show_menu && game_state->triumphant_player < 0 && IsWindowFocused()) {
+		if (game_state->game_in_progress && !game_state->show_menu && IsWindowFocused()) {
 			game_state->game_play_time += dt;
 
 
@@ -672,11 +703,11 @@ int main(void)
 						Vector2Scale(normal, momentum_2)
 					);
 
-					if (hit_is_hard_enough(normal_response_1/dt)) {
+					if (hit_is_hard_enough(normal_response_1)) {
 						spawn_bullet_ring(player1, &random_state);
 					}
 					
-					if (hit_is_hard_enough(normal_response_2/dt)) {
+					if (hit_is_hard_enough(normal_response_2)) {
 						spawn_bullet_ring(player2, &random_state);
 					}
 				}
@@ -750,7 +781,7 @@ int main(void)
 						}
 					}
 
-					if (hit_is_hard_enough(cumulative_edge_bounce/dt)) {
+					if (hit_is_hard_enough(cumulative_edge_bounce)) {
 						spawn_bullet_ring(player, &random_state);
 					}
 				}
@@ -811,8 +842,9 @@ int main(void)
 
 							opponent->hit_animation_t = 0.0f;
 
-							if (opponent->health == 0) {
+							if (opponent->health <= 0) {
 								game_state->triumphant_player = player_index;
+								game_state->game_in_progress = false;
 								PlaySound(game_state->sound_win);
 							}
 						}
@@ -837,54 +869,93 @@ int main(void)
 		}
 		else if (game_state->show_menu && !toggle_fullscreen) {
 
-			int item_change = 0;
+			int item_change_y = 0;
+			int item_change_x = 0;
+			int item_enter = IsKeyPressed(KEY_ENTER);
 
 			if (IsKeyDown(KEY_UP)) {
-				item_change = game_state->menu_item_count - 1;
+				item_change_y = -1;
 			}
 
 			if (IsKeyDown(KEY_DOWN)) {
-				++item_change;
+				++item_change_y;
 			}
 
-			if (!item_change) {
-				game_state->menu_item_cooldown = 0.0;
+			if (IsKeyDown(KEY_LEFT)) {
+				item_change_x = -1;
 			}
+
+			if (IsKeyDown(KEY_RIGHT)) {
+				++item_change_x;
+			}
+
 
 			double current_time = GetTime();
 
-			if (item_change && game_state->menu_item_cooldown < current_time) {
-				game_state->selected_menu_item += item_change;
-				game_state->selected_menu_item %= game_state->menu_item_count;
-				game_state->menu_item_cooldown = current_time + 0.2;
+			if (!item_change_y && !item_change_x) {
+				menu_item_cooldown = 0.0;
+			}
+			else {
+				if (menu_item_cooldown < current_time) {
+					if (item_change_y) {
+						menu->selected_index += menu->item_count + item_change_y;
+						menu->selected_index %= menu->item_count;
+					}
+					menu_item_cooldown = current_time + 0.2f;
+				}
+				else {
+					item_change_y = 0;
+					item_change_x = 0;
+				}
 			}
 
-			Menu_Item *item = &game_state->menu[game_state->selected_menu_item];
+			Menu_Item *item = &menu->items[menu->selected_index];
 
 			switch (item->type) {
 				case MENU_ITEM_INT:
-					if (IsKeyDown(KEY_LEFT)) {
-						--*item->u.int_ref;
-					}
-					else if (IsKeyDown(KEY_RIGHT)) {
-						++*item->u.int_ref;
+					if (item_change_x) {
+						*item->u.int_ref += item_change_x;
+						if (*item->u.int_ref < 0) {
+							*item->u.int_ref = 0;
+						}
 					}
 					break;
 				case MENU_ITEM_FLOAT:
 					break;
 				case MENU_ITEM_BOOL:
-					if (IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_ENTER)) {
+					if (item_change_x || item_enter) {
 						*item->u.bool_ref = !*item->u.bool_ref;
 					}
 					break;
-				case MENU_ITEM_ACTION_PLAY:
-					if (IsKeyPressed(KEY_ENTER)) {
+				case MENU_ITEM_ACTION_CONTINUE:
+					if (item_enter) {
 						game_state->show_menu = false;
 					}
 					break;
+				case MENU_ITEM_ACTION_NEW_GAME:
+					if (item_enter) {
+						game_state->show_menu = false;
+						reset_game(game_state, view);
+					}
+					break;
 				case MENU_ITEM_ACTION_QUIT:
-					if (IsKeyPressed(KEY_ENTER)) {
+					if (item_enter) {
 						game_state->running = false;
+					}
+					break;
+				case MENU_ITEM_MENU:
+					if (item_enter) {
+						item->u.menu_ref->parent = menu;
+						menu = item->u.menu_ref;
+						menu->selected_index = 0;
+					}
+					break;
+				case MENU_ITEM_MENU_BACK:
+					if (item_enter) {
+						Menu *parent = menu->parent;
+						if (parent) {
+							menu = menu->parent;
+						}
 					}
 					break;
 				default: break;
@@ -1202,13 +1273,17 @@ int main(void)
 
 				float font_size = 48*view.scale;
 				float font_spacing = font_size*FONT_SPACING_FOR_SIZE;
-				Vector2 pos = Vector2Multiply(screen, (Vector2){0.5f, 0.25f});
+				float line_advance = 70.0f*view.scale;
+ 				float menu_height = menu->item_count * line_advance;
+
+				Vector2 pos = Vector2Multiply(screen, (Vector2){0.5f, 0.5f});
+				pos.y -= 0.5f*menu_height;
 
 				for (unsigned int menu_item_index = 0;
-					menu_item_index < menu_item_count;
+					menu_item_index < menu->item_count;
 					++menu_item_index
 				) {
-					Menu_Item *item = &game_state->menu[menu_item_index];
+					Menu_Item *item = &menu->items[menu_item_index];
 
 					char buffer[512];
 
@@ -1230,9 +1305,8 @@ int main(void)
 
 					pos.x = screen_center.x - 0.5f*text_dim.x;
 
-					float padding = 70.0f*view.scale;
 
-					bool selected = menu_item_index == game_state->selected_menu_item;
+					bool selected = menu_item_index == menu->selected_index;
 
 					if (selected) {
 						Vector2 rect_pos = Vector2Subtract(pos, (Vector2){25.0f*view.scale, 10.0f*view.scale});
@@ -1244,7 +1318,7 @@ int main(void)
 						DrawTextEx(default_font, buffer, pos, font_size, font_spacing, BLACK);
 					}
 
-					pos.y += padding;
+					pos.y += line_advance;
 				}
 
 
