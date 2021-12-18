@@ -1,11 +1,13 @@
 #include <assert.h>
 #include <string.h>
 #include <stdlib.h>
-#include <raylib.h>
 #include <raymath.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <time.h>
+
+#include <raylib.h>
+#include <GLFW/glfw3.h>
 
 #ifdef __APPLE__
 #include "CoreFoundation/CoreFoundation.h"
@@ -33,6 +35,7 @@ typedef struct Bullet {
 	Vector2 position;
 	Vector2 velocity;
 	float time;
+	float spin;
 } Bullet;
 
 
@@ -82,6 +85,7 @@ typedef struct Player {
 	float shoot_time_out;
 	float hit_animation_t;
 	float shoot_charge_t;
+	float angular_velocity;
 #define MAX_ACTIVE_BULLETS 2048
 	int active_bullets;
 	Bullet bullets[MAX_ACTIVE_BULLETS];
@@ -97,14 +101,20 @@ typedef struct Ring {
 
 enum Menu_Item_Type {
 	MENU_ITEM_LABEL = 0,
-	MENU_ITEM_ACTION_NEW_GAME,
-	MENU_ITEM_ACTION_CONTINUE,
+	MENU_ITEM_ACTION,
 	MENU_ITEM_BOOL,
 	MENU_ITEM_INT,
 	MENU_ITEM_FLOAT,
 	MENU_ITEM_MENU,
 	MENU_ITEM_MENU_BACK,
-	MENU_ITEM_ACTION_QUIT,
+};
+
+enum Menu_Action {
+	MENU_ACTION_NEW_GAME,
+	MENU_ACTION_CONTINUE,
+	MENU_ACTION_QUIT,
+
+	MENU_ACTION_FULLSCREEN_TOGGLE,
 };
 
 typedef struct Menu_Item {
@@ -115,7 +125,9 @@ typedef struct Menu_Item {
 		float *float_ref;
 		bool *bool_ref;
 		struct Menu *menu_ref;
+		int int_value;
 	} u;
+	int (* action)(int change, char *user_data);
 } Menu_Item;
 
 typedef struct Menu {
@@ -131,6 +143,7 @@ typedef struct Game_State {
 	Sound sound_win;
 	int triumphant_player;
 	float title_alpha;
+	float time_scale;
 	bool game_in_progress;
 	float game_play_time;
 #define NUM_PLAYERS 2
@@ -138,6 +151,9 @@ typedef struct Game_State {
 #define MAX_ACTIVE_RINGS 128
 	int active_rings;
 	Ring rings[MAX_ACTIVE_RINGS];
+	int color_red;
+	int color_green;
+	int color_blue;
 } Game_State;
 
 
@@ -187,7 +203,7 @@ void spawn_bullet_ring(Player *player, uint64_t *random_state) {
 	player->energy -= count * player->params.bullet_energy_cost_ring;
 
 	if (player->energy < 0) {
-		player->energy = 0.0f; 
+		player->energy = 0.0f;
 	}
 
 	float angle_quantum = 2.0f*PI / (float)count;
@@ -199,6 +215,7 @@ void spawn_bullet_ring(Player *player, uint64_t *random_state) {
 		bullet->position = player->position;
 		bullet->velocity = Vector2Scale((Vector2){cosf(angle), sinf(angle)}, speed);
 		bullet->time = 0;
+		bullet->spin = 0.3f * player->angular_velocity;
 		angle += angle_quantum;
 	}
 
@@ -231,6 +248,7 @@ void spawn_bullet_fan(Player *player, int count, float speed, float angle_span) 
 		bullet->velocity = Vector2Scale((Vector2){cosf(angle), sinf(angle)}, speed);
 		bullet->velocity = Vector2Add(bullet->velocity, quater_player_velocity);
 		bullet->time = 0;
+		bullet->spin = 0.3f * player->angular_velocity;
 		angle += angle_quantum;
 	}
 
@@ -327,40 +345,81 @@ View get_updated_view(void) {
 	return result;
 }
 
+float shortest_angle_difference(float a, float b) {
+	// NOTE(jakob & patrick): This assumes normalized angles between 0 and 2*PI
+	// assert(a >= 0.0f);
+	// assert(b >= 0.0f);
+	// assert(a <= 2*PI + 0.00001f);
+	// assert(b <= 2*PI + 0.00001f);
+
+	float angle_difference = b - a;
+
+	if (angle_difference > PI) {
+		angle_difference -= 2*PI;
+	} else if (angle_difference < -PI) {
+		angle_difference += 2*PI;
+	}
+
+	return angle_difference;
+}
+
 float lerp_angle(float a, float b, float t) {
+	float difference = shortest_angle_difference(a, b);
+	float result = a + t*difference;
+
+	if (result >= 2*PI) {
+		result -= 2*PI;
+	}
+	else if (result < 0.0f) {
+		result += 2*PI;
+	}
+	return result;
+}
+
+int menu_action_toggle_fullscreen(int change, char *user_data) {
+	// bool *is_fullscreen = (bool *)user_data;
+
+	// *is_fullscreen = !*is_fullscreen;
+
+	ToggleFullscreen();
+
+	return 0;
+};
+
+float _lerp_angle(float a, float b, float t) {
 	// From https://gist.github.com/itsmrpeck/be41d72e9d4c72d2236de687f6f53974
 
-    float result;
+	float result;
 
-    float angle_difference = b - a;
+	float angle_difference = b - a;
 
-    if (angle_difference < -PI)
-    {
-        // lerp upwards past 2*PI
-        b += 2*PI;
-        result = Lerp(a, b, t);
-        if (result >= 2*PI)
-        {
-            result -= 2*PI;
-        }
-    }
-    else if (angle_difference > PI)
-    {
-        // lerp downwards past 0
-        b -= 2*PI;
-        result = Lerp(a, b, t);
-        if (result < 0.f)
-        {
-            result += 2*PI;
-        }
-    }
-    else
-    {
-        // straight lerp
-        result = Lerp(a, b, t);
-    }
+	if (angle_difference < -PI)
+	{
+		// lerp upwards past 2*PI
+		b += 2*PI;
+		result = Lerp(a, b, t);
+		if (result >= 2*PI)
+		{
+			result -= 2*PI;
+		}
+	}
+	else if (angle_difference > PI)
+	{
+		// lerp downwards past 0
+		b -= 2*PI;
+		result = Lerp(a, b, t);
+		if (result < 0.f)
+		{
+			result += 2*PI;
+		}
+	}
+	else
+	{
+		// straight lerp
+		result = Lerp(a, b, t);
+	}
 
-    return result;
+	return result;
 }
 
 int main(void)
@@ -399,10 +458,18 @@ int main(void)
 	// Set configuration flags for window creation
 	SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
 
+
+
 	// InitWindow(2560, 1440, title);
 	InitWindow(1024, 768, title);
 	HideCursor();
 	ToggleFullscreen();
+
+	// Get available video modes from GLFW
+ 	int video_mode_count;
+    const GLFWvidmode* video_modes = glfwGetVideoModes(glfwGetPrimaryMonitor(), &video_mode_count);
+
+    SetTargetFPS(60);
 
 	// NOTE(jakob): Zeroed memory as part of initialization
 	Game_State *game_state = calloc(1, sizeof(*game_state));
@@ -439,22 +506,48 @@ int main(void)
 	}
 	game_state->sound_win = LoadSound("resources/win.wav");
 
+	game_state->color_red = 255;
+	game_state->color_green = 255;
+	game_state->color_blue = 255;
+
+	game_state->time_scale = 1.0f;
+
 	Menu main_menu = {0};
-	Menu options_menu = {0};
+	Menu settings_menu = {0};
 
 	main_menu.item_count = 4;
 	main_menu.items = (Menu_Item []) {
-		{MENU_ITEM_ACTION_CONTINUE, "Continue", .u = {0}},
-		{MENU_ITEM_ACTION_NEW_GAME, "New Game", .u = {0}},
-		{MENU_ITEM_MENU, "Options", .u.menu_ref = &options_menu},
-		{MENU_ITEM_ACTION_QUIT, "Quit", .u = {0}},
+		{MENU_ITEM_ACTION, "Continue", .u.int_value=MENU_ACTION_CONTINUE},
+		{MENU_ITEM_ACTION, "New Game", .u.int_value=MENU_ACTION_NEW_GAME},
+		{MENU_ITEM_MENU, "Settings", .u.menu_ref = &settings_menu},
+		{MENU_ITEM_ACTION, "Quit", .u.int_value=MENU_ACTION_QUIT},
 	};
 
-	options_menu.item_count = 3;
-	options_menu.items = (Menu_Item []){
+	Menu gameplay_settings_menu = {0};
+	Menu video_settings_menu = {0};
+
+	settings_menu.item_count = 3;
+	settings_menu.items = (Menu_Item []){
+		{MENU_ITEM_MENU_BACK, "Back", .u = {0}},
+		{MENU_ITEM_MENU, "Gameplay Settings", .u.menu_ref = &gameplay_settings_menu},
+		{MENU_ITEM_MENU, "Video Settings", .u.menu_ref = &video_settings_menu},
+	};
+
+	gameplay_settings_menu.item_count = 4;
+	gameplay_settings_menu.items = (Menu_Item []){
 		{MENU_ITEM_MENU_BACK, "Back", .u = {0}},
 		{MENU_ITEM_INT, "Orange Player Health", .u.int_ref = &game_state->players[0].params.starting_health},
-		{MENU_ITEM_INT, "Blue Player Health", .u.int_ref= &game_state->players[1].params.starting_health},
+		{MENU_ITEM_INT, "Blue Player Health", .u.int_ref = &game_state->players[1].params.starting_health},
+		{MENU_ITEM_FLOAT, "Time Scale", .u.float_ref = &game_state->time_scale},
+	};
+
+	video_settings_menu.item_count = 5;
+	video_settings_menu.items = (Menu_Item []){
+		{MENU_ITEM_MENU_BACK, "Back", .u = {0}},
+		{MENU_ITEM_INT, "Background (Red)", .u.int_ref = &game_state->color_red},
+		{MENU_ITEM_INT, "Background (Green)", .u.int_ref = &game_state->color_green},
+		{MENU_ITEM_INT, "Background (Blue)", .u.int_ref = &game_state->color_blue},
+		{MENU_ITEM_ACTION, "Full Screen", .action = menu_action_toggle_fullscreen},
 	};
 
 	Menu *menu = &main_menu;
@@ -477,7 +570,7 @@ int main(void)
 	// Main game loop
 	while (game_state->running)    // Detect window close button or ESC key
 	{
-		float dt = GetFrameTime();
+		float dt = game_state->time_scale * GetFrameTime();
 		bool window_resized = IsWindowResized();
 
 		if (window_resized) {
@@ -589,7 +682,16 @@ int main(void)
 						control = Vector2Scale(control, INV_SQRT_TWO);
 					}
 
-					player->shoot_angle = lerp_angle(player->shoot_angle, control_angle, 3.0f * dt);
+
+					float old_angle = player->shoot_angle;
+
+					player->shoot_angle = lerp_angle(old_angle, control_angle, 4.0f * dt);
+
+					float angular_difference = shortest_angle_difference(old_angle, player->shoot_angle);
+
+					angular_difference *= 10.0f;
+
+					player->angular_velocity = 0.5f*player->angular_velocity + 0.5f*angular_difference;
 				}
 
 				Vector2 acceleration = Vector2Scale(control, player->params.acceleration_force * dt);
@@ -706,7 +808,7 @@ int main(void)
 					if (hit_is_hard_enough(normal_response_1)) {
 						spawn_bullet_ring(player1, &random_state);
 					}
-					
+
 					if (hit_is_hard_enough(normal_response_2)) {
 						spawn_bullet_ring(player2, &random_state);
 					}
@@ -774,9 +876,9 @@ int main(void)
 
 						if (edge_offset < 0) {
 							target_position.y = 0 + player_radius;
-							
+
 							cumulative_edge_bounce += fabs(player->velocity.y);
-							
+
 							player->velocity.y = bounce_back_factor*(player->velocity.y + edge_offset);
 						}
 					}
@@ -815,6 +917,9 @@ int main(void)
 					Vector2 bullet_position = bullet->position;
 
 					bullet->position = Vector2Add(bullet_position, Vector2Scale(bullet->velocity, dt));
+
+					// TODO(jakob): Spin moves
+					bullet->velocity = Vector2Rotate(bullet->velocity, bullet->spin);
 
 					float bullet_radius = player->params.bullet_radius;
 					bool bullet_overlaps_opponent = CheckCollisionCircles(bullet_position, bullet_radius, opponent->position, opponent_radius);
@@ -921,26 +1026,36 @@ int main(void)
 					}
 					break;
 				case MENU_ITEM_FLOAT:
+					if (item_change_x) {
+						*item->u.float_ref += item_change_x * 0.1f;
+						if (*item->u.float_ref < 0) {
+							*item->u.float_ref = 0;
+						}
+					}
 					break;
 				case MENU_ITEM_BOOL:
 					if (item_change_x || item_enter) {
 						*item->u.bool_ref = !*item->u.bool_ref;
 					}
 					break;
-				case MENU_ITEM_ACTION_CONTINUE:
+				case MENU_ITEM_ACTION:
 					if (item_enter) {
-						game_state->show_menu = false;
-					}
-					break;
-				case MENU_ITEM_ACTION_NEW_GAME:
-					if (item_enter) {
-						game_state->show_menu = false;
-						reset_game(game_state, view);
-					}
-					break;
-				case MENU_ITEM_ACTION_QUIT:
-					if (item_enter) {
-						game_state->running = false;
+						switch (item->u.int_value) {
+							case MENU_ACTION_CONTINUE:
+								game_state->show_menu = false;
+								break;
+							case MENU_ACTION_NEW_GAME:
+								game_state->show_menu = false;
+								reset_game(game_state, view);
+								break;
+							case MENU_ACTION_QUIT:
+								game_state->running = false;
+								break;
+
+							case MENU_ACTION_FULLSCREEN_TOGGLE:
+								item->action(1, NULL);
+								break;
+						}
 					}
 					break;
 				case MENU_ITEM_MENU:
@@ -971,7 +1086,7 @@ int main(void)
 
 		BeginDrawing();
 
-		ClearBackground((Color){255, 255, 255, 255});
+		ClearBackground((Color){game_state->color_red, game_state->color_green, game_state->color_blue, 255});
 
 		Vector2 screen = (Vector2){view.screen_width, view.screen_height};
 
@@ -1095,8 +1210,8 @@ int main(void)
 
 					float narrow_angle_offset = 2.0f*PI / 24.0f;
 					float wide_angle_offset = 2.0f*PI / 7.0f;
-				 	angle_offset = (1.0f-t)*wide_angle_offset + t*narrow_angle_offset;
-				 	pointiness = (1.0f-t)*15.0f + t*50.0f;
+					angle_offset = (1.0f-t)*wide_angle_offset + t*narrow_angle_offset;
+					pointiness = (1.0f-t)*15.0f + t*50.0f;
 				}
 
 				float angle1 = player->shoot_angle - angle_offset;
@@ -1274,7 +1389,7 @@ int main(void)
 				float font_size = 48*view.scale;
 				float font_spacing = font_size*FONT_SPACING_FOR_SIZE;
 				float line_advance = 70.0f*view.scale;
- 				float menu_height = menu->item_count * line_advance;
+				float menu_height = menu->item_count * line_advance;
 
 				Vector2 pos = Vector2Multiply(screen, (Vector2){0.5f, 0.5f});
 				pos.y -= 0.5f*menu_height;
