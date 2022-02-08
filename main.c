@@ -38,14 +38,36 @@ typedef struct Bullet {
 	float spin;
 } Bullet;
 
+typedef struct {
+	KeyboardKey left;
+	KeyboardKey right;
+	KeyboardKey up;
+	KeyboardKey down;
+	KeyboardKey action;
+} Keyboard_Control;
+
+typedef struct {
+	int gamepad_id;
+	GamepadAxis axis_horizontal;
+	GamepadAxis axis_vertical;
+	GamepadButton left;
+	GamepadButton right;
+	GamepadButton up;
+	GamepadButton down;
+	GamepadButton action;
+} Gamepad_Control;
+
+#define MAX_CONTROLS_TEXT_LENGTH 128
+typedef struct Controls {
+	char controls_text[MAX_CONTROLS_TEXT_LENGTH];
+	bool use_gamepad;
+	Keyboard_Control keyboard;
+	Gamepad_Control gamepad;
+} Controls;
 
 typedef struct Player_Parameters {
-	KeyboardKey key_left;
-	KeyboardKey key_right;
-	KeyboardKey key_up;
-	KeyboardKey key_down;
-	KeyboardKey key_action;
-	const char *key_text;
+	Controls controls;
+
 	Sound sound_pop;
 	Sound sound_hit;
 	Color color;
@@ -74,6 +96,11 @@ static const Player_Parameters default_player_params = {
 	.bullet_time_end_fade = 7.0f,
 	.bullet_time_begin_fade = (7.0f-0.4f),
 };
+
+typedef struct Input {
+	Vector2 control;
+	int shoot_action;
+} Input;
 
 typedef struct Player {
 	Vector2 position;
@@ -384,40 +411,56 @@ int menu_action_toggle_fullscreen(int change, char *user_data) {
 	ToggleFullscreen();
 
 	return 0;
-};
+}
 
-float _lerp_angle(float a, float b, float t) {
-	// From https://gist.github.com/itsmrpeck/be41d72e9d4c72d2236de687f6f53974
+Input get_input_for_player(Player *player) {
 
-	float result;
+	Input result = {0};
 
-	float angle_difference = b - a;
+	Player_Parameters *parameters = &player->params;
+	Keyboard_Control keyboard = parameters->controls.keyboard;
+	Gamepad_Control gamepad = parameters->controls.gamepad;
 
-	if (angle_difference < -PI)
-	{
-		// lerp upwards past 2*PI
-		b += 2*PI;
-		result = Lerp(a, b, t);
-		if (result >= 2*PI)
-		{
-			result -= 2*PI;
+	if (parameters->controls.use_gamepad) {
+		float gamepad_x = GetGamepadAxisMovement(gamepad.gamepad_id, gamepad.axis_horizontal);
+		float gamepad_y = GetGamepadAxisMovement(gamepad.gamepad_id, gamepad.axis_vertical);
+
+		fprintf(stderr, "Gamepad: (%.4f, %.4f)\n", gamepad_x, gamepad_y);
+
+		result.control.x = gamepad_x;
+		result.control.y = gamepad_y;
+
+		if (IsGamepadButtonDown(gamepad.gamepad_id, gamepad.action)) {
+			result.shoot_action = 1;
+		}
+		else if (IsGamepadButtonReleased(gamepad.gamepad_id, gamepad.action)) {
+			result.shoot_action = 2;
 		}
 	}
-	else if (angle_difference > PI)
-	{
-		// lerp downwards past 0
-		b -= 2*PI;
-		result = Lerp(a, b, t);
-		if (result < 0.f)
-		{
-			result += 2*PI;
-		}
+
+	if (IsKeyDown(keyboard.left))  result.control.x -= 1.0f;
+	if (IsKeyDown(keyboard.right)) result.control.x += 1.0f;
+	if (IsKeyDown(keyboard.up))    result.control.y -= 1.0f;
+	if (IsKeyDown(keyboard.down))  result.control.y += 1.0f;
+
+	if (IsKeyDown(keyboard.action)) {
+		result.shoot_action = 1;
 	}
-	else
-	{
-		// straight lerp
-		result = Lerp(a, b, t);
+	else if (IsKeyReleased(keyboard.action)) {
+		result.shoot_action = 2;
 	}
+
+	float control_length = Vector2Length(result.control);
+
+	fprintf(stderr, "control_length: %.4f\n", control_length);
+
+	if (control_length < 0.5f) {
+		result.control = (Vector2){0};
+	}
+	else if (control_length > 1.0f) {
+		result.control = Vector2Scale(result.control, 1.0f/control_length);
+	}
+
 
 	return result;
 }
@@ -463,11 +506,11 @@ int main(void)
 	// InitWindow(2560, 1440, title);
 	InitWindow(1024, 768, title);
 	HideCursor();
-	ToggleFullscreen();
+	// ToggleFullscreen();
 
 	// Get available video modes from GLFW
- 	int video_mode_count;
-    const GLFWvidmode* video_modes = glfwGetVideoModes(glfwGetPrimaryMonitor(), &video_mode_count);
+ 	// int video_mode_count;
+    // const GLFWvidmode* video_modes = glfwGetVideoModes(glfwGetPrimaryMonitor(), &video_mode_count);
 
     SetTargetFPS(60);
 
@@ -477,16 +520,29 @@ int main(void)
 
 	{
 		Player_Parameters *p;
+		Keyboard_Control *kb;
+		Gamepad_Control *gp;
 
 		p = &game_state->players[0].params;
 
 		*p = default_player_params;
-		p->key_left = KEY_LEFT;
-		p->key_right = KEY_RIGHT;
-		p->key_up = KEY_UP;
-		p->key_down = KEY_DOWN;
-		p->key_action = KEY_RIGHT_CONTROL;
-		p->key_text = "Arrow Keys + Right CTRL";
+		p->controls.use_gamepad = true;
+		kb = &p->controls.keyboard;
+		gp = &p->controls.gamepad;
+		gp->gamepad_id = 0;
+		kb->left = KEY_LEFT;
+		kb->right = KEY_RIGHT;
+		kb->up = KEY_UP;
+		kb->down = KEY_DOWN;
+		kb->action = KEY_RIGHT_CONTROL;
+		gp->axis_horizontal = GAMEPAD_AXIS_LEFT_X;
+		gp->axis_vertical = GAMEPAD_AXIS_LEFT_Y;
+		gp->left = GAMEPAD_BUTTON_LEFT_FACE_LEFT;
+		gp->right = GAMEPAD_BUTTON_LEFT_FACE_RIGHT;
+		gp->up = GAMEPAD_BUTTON_LEFT_FACE_UP;
+		gp->down = GAMEPAD_BUTTON_LEFT_FACE_DOWN;
+		gp->action = GAMEPAD_BUTTON_RIGHT_FACE_DOWN;
+		snprintf(p->controls.controls_text, MAX_CONTROLS_TEXT_LENGTH, "Arrow Keys + Right CTRL");
 		p->sound_pop = LoadSound("resources/player_1_pop.wav");
 		p->sound_hit = LoadSound("resources/player_1_hit.wav");
 		p->color = (Color){240.0f, 120.0f, 0.0f, 255.0f};
@@ -494,12 +550,13 @@ int main(void)
 		p = &game_state->players[1].params;
 
 		*p = default_player_params;
-		p->key_left = KEY_A;
-		p->key_right = KEY_D;
-		p->key_up = KEY_W;
-		p->key_down = KEY_S;
-		p->key_action = KEY_LEFT_CONTROL;
-		p->key_text = "W,A,S,D + Left CTRL";
+		kb = &p->controls.keyboard;
+		kb->left = KEY_A;
+		kb->right = KEY_D;
+		kb->up = KEY_W;
+		kb->down = KEY_S;
+		kb->action = KEY_LEFT_CONTROL;
+		snprintf(p->controls.controls_text, MAX_CONTROLS_TEXT_LENGTH, "W,A,S,D + Left CTRL");
 		p->sound_pop = LoadSound("resources/player_2_pop.wav");
 		p->sound_hit = LoadSound("resources/player_2_hit.wav");
 		p->color = (Color){0.0f, 120.0f, 240.0f, 255.0f};
@@ -606,6 +663,7 @@ int main(void)
 			game_state->running = false;
 		}
 
+		// Change view dimensions and ensure that players are inside the playing field
 		if (window_resized) {
 
 			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
@@ -654,34 +712,15 @@ int main(void)
 
 				Player *player = game_state->players + player_index;
 
-				Vector2 control = {0.0f, 0.0f};
-
-				Player_Parameters *parameters = &player->params;
-
-				if (IsKeyDown(parameters->key_left))  control.x  = -1.0f;
-				if (IsKeyDown(parameters->key_right)) control.x +=  1.0f;
-				if (IsKeyDown(parameters->key_up))    control.y  = -1.0f;
-				if (IsKeyDown(parameters->key_down))  control.y +=  1.0f;
+				Input input = get_input_for_player(player);
 
 				float friction_fraction = 1.0f;
 
-				if (control.x == 0.0f && control.y == 0.0f) {
+				if (input.control.x == 0.0f && input.control.y == 0.0f) {
 					friction_fraction = 0.1f;
 				}
 				else {
-
-					// NOTE(jakob): atan2 lookup table
-					float control_angle = ((float[3][3]){
-						{-2.356194490192345f, 3.141592653589793f, 2.356194490192345f},
-						{-1.5707963267948966f, 0.0f, 1.5707963267948966f},
-						{-0.7853981633974483f, 0.0f, 0.7853981633974483f},
-					})[(int)control.x+1][(int)control.y+1];
-
-					if (control.x != 0.0f && control.y != 0.0f) {
-						// Normalize player movement controls
-						control = Vector2Scale(control, INV_SQRT_TWO);
-					}
-
+					float control_angle = atan2f(input.control.y, input.control.x);
 
 					float old_angle = player->shoot_angle;
 
@@ -694,7 +733,7 @@ int main(void)
 					player->angular_velocity = 0.5f*player->angular_velocity + 0.5f*angular_difference;
 				}
 
-				Vector2 acceleration = Vector2Scale(control, player->params.acceleration_force * dt);
+				Vector2 acceleration = Vector2Scale(input.control, player->params.acceleration_force * dt);
 
 				acceleration = Vector2Subtract(acceleration, Vector2Scale(player->velocity, player->params.friction * friction_fraction * dt));
 
@@ -703,14 +742,14 @@ int main(void)
 				//
 				if (player->shoot_time_out < game_state->game_play_time) {
 
-					if (IsKeyDown(parameters->key_action) && player->shoot_charge_t < 1.0f) {
+					if (input.shoot_action == 1 && player->shoot_charge_t < 1.0f) {
 						float full_charges_per_second = 1.5f;
 						player->shoot_charge_t += full_charges_per_second * dt;
 						if (player->shoot_charge_t > 1.0f) {
 							player->shoot_charge_t = 1.0f;
 						}
 					}
-					else if (IsKeyReleased(parameters->key_action)) {
+					else if (input.shoot_action == 2) {
 						float shoot_cooldown_seconds = 1.0f;
 						player->shoot_time_out = game_state->game_play_time + shoot_cooldown_seconds;
 
@@ -919,7 +958,7 @@ int main(void)
 					bullet->position = Vector2Add(bullet_position, Vector2Scale(bullet->velocity, dt));
 
 					// TODO(jakob): Spin moves
-					bullet->velocity = Vector2Rotate(bullet->velocity, bullet->spin);
+					bullet->velocity = Vector2Rotate(bullet->velocity, bullet->spin * dt);
 
 					float bullet_radius = player->params.bullet_radius;
 					bool bullet_overlaps_opponent = CheckCollisionCircles(bullet_position, bullet_radius, opponent->position, opponent_radius);
@@ -1299,12 +1338,12 @@ int main(void)
 				if (player->controls_text_timeout < game_state->game_play_time) {
 
 					float player_radius = calculate_player_radius(player)*view.scale;
-					float font_size = player_radius*1.0f;
-					float font_spacing = font_size*FONT_SPACING_FOR_SIZE;
+					float font_size;
+					float font_spacing;
 
 					Color controls_color = parameters->color;
 
-					const char *text = parameters->key_text;
+					const char *text = "TODO";//parameters->key_text;
 
 					font_size = 30.0f*view.scale;
 					font_spacing = font_size*FONT_SPACING_FOR_SIZE;
