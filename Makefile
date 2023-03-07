@@ -1,6 +1,6 @@
 
 
-.PHONY : all clean run
+.PHONY : all clean
 
 BINARY ?= Juelsminde-Joust
 
@@ -9,8 +9,11 @@ RAYDIR := raylib-4.0.0
 CC := gcc
 
 CFLAGS += -std=c99
-CFLAGS += -Wall -Wextra -Wno-missing-braces -Werror=pointer-arith -fno-strict-aliasing
-CFLAGS += -Og -ggdb
+# CFLAGS += -Og -ggdb
+CFLAGS += -O5
+CFLAGS += -Wall -pedantic -Wextra -Wno-missing-braces -Werror=pointer-arith -fno-strict-aliasing
+CFLAGS += -Wshadow -Wpointer-arith -Wcast-qual -Wcast-align -Wstrict-prototypes -Wmissing-prototypes -Wconversion
+CFLAGS += -ftabstop=1
 
 #Include dirs
 CFLAGS += -I$(RAYDIR)/include
@@ -24,15 +27,19 @@ LDFLAGS += -ldl
 LDFLAGS += -lrt
 LDFLAGS += -lX11
 
-run: $(BINARY)
-	./$(BINARY)
+RAYLIB_OPTIONS += PLATFORM=PLATFORM_DESKTOP
+# RAYLIB_OPTIONS += RAYLIB_BUILD_MODE=DEBUG
 
-$(BINARY) : main.c jj_math.c jj_math.h Makefile $(RAYDIR)/libraylib.a
-	$(CC) -o $(BINARY) $(CFLAGS) main.c $(LDFLAGS)
+all : $(BINARY) run
 
-$(RAYDIR)/libraylib.a :
-	cd $(RAYDIR)/src
-	make
+$(BINARY) : raylib_juelsminde_joust.c jj_math.c jj_math.h Makefile $(RAYDIR)/libraylibjkk.a
+	$(CC) -o $(BINARY) $(CFLAGS) raylib_juelsminde_joust.c $(LDFLAGS)
+
+$(RAYDIR)/libraylibjkk.a :
+	cd $(RAYDIR)/src && make -f Makefile $(RAYLIB_OPTIONS)
 
 clean:
 	rm $(BINARY)
+
+run: $(BINARY)
+	./$(BINARY)

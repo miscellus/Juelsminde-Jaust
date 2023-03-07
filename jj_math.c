@@ -2,21 +2,8 @@
 #include <raymath.h>
 
 
-float sign_float(float v) {
-    return v > 0 ? 1.0f : v < 0 ? -1.0f : 0.0f;
-}
-
 float abs_float(float v) {
     return v >= 0 ? v : -v;
-}
-
-Vector2 Vector2Sign(Vector2 v) {
-    Vector2 result;
-
-    result.x = sign_float(v.x); 
-    result.y = sign_float(v.y); 
-
-    return result;
 }
 
 Vector2 Vector2Abs(Vector2 v) {

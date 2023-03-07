@@ -18,8 +18,6 @@ float sign_float(float v);
 
 float abs_float(float v);
 
-Vector2 Vector2Sign(Vector2 v);
-
 Vector2 Vector2Abs(Vector2 v);
 
 Vector2 Vector2NormalizeOrZero(Vector2 v);
