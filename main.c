@@ -38,13 +38,47 @@ typedef struct Bullet {
 	float spin;
 } Bullet;
 
+typedef struct Virtual_Input_Button {
+	bool is_down;
+	bool is_pressed;
+	bool is_released;
+	// TODO(jakob): Make possible to detect multiple keystrokes per frame (state_transition_count) 
+	// int state_transition_count;
+} Virtual_Input_Button;
+
+enum {
+	VIRTUAL_BUTTON_ACTION = 0,
+	VIRTUAL_BUTTON_MENU = 1,
+
+	VIRTUAL_BUTTON_COUNT
+};
+
+typedef struct Virtual_Input_Device_State {
+	Vector2 direction; // NOTE(jakob): Valid in unit circle
+	Virtual_Input_Button buttons[VIRTUAL_BUTTON_COUNT];
+} Virtual_Input_Device_State;
+
+typedef struct Virtual_Input_Device {
+	bool use_gamepad;
+	struct {
+		int gamepad_number;
+	} gamepad;
+
+	struct {
+		KeyboardKey key_left;
+		KeyboardKey key_right;
+		KeyboardKey key_up;
+		KeyboardKey key_down;
+		KeyboardKey key_action;
+		KeyboardKey key_menu;
+	} keys;
+
+	Virtual_Input_Device_State state;
+} Virtual_Input_Device;
 
 typedef struct Player_Parameters {
-	KeyboardKey key_left;
-	KeyboardKey key_right;
-	KeyboardKey key_up;
-	KeyboardKey key_down;
-	KeyboardKey key_action;
+	int input_device_index;
+
 	const char *key_text;
 	Sound sound_pop;
 	Sound sound_hit;
@@ -140,6 +174,10 @@ typedef struct Menu {
 typedef struct Game_State {
 	bool running;
 	bool show_menu;
+
+#define NUM_INPUT_DEVICES 2 // @hardcode
+	Virtual_Input_Device input_devices[NUM_INPUT_DEVICES];
+
 	Sound sound_win;
 	int triumphant_player;
 	float title_alpha;
@@ -422,6 +460,47 @@ float _lerp_angle(float a, float b, float t) {
 	return result;
 }
 
+static void virtual_input_update_devices(Virtual_Input_Device *input_devices) {
+	for (int device_index = 0; device_index < NUM_INPUT_DEVICES; ++device_index) {
+
+		Virtual_Input_Device *dev = &input_devices[device_index];
+
+		if (dev->use_gamepad) {
+			// TODO(jakob)
+			int gamepad_number = dev->gamepad.gamepad_number;
+
+			Vector2 direction = {0.0f, 0.0f};
+
+			direction.x = GetGamepadAxisMovement(gamepad_number, GAMEPAD_AXIS_LEFT_X);
+            direction.y = GetGamepadAxisMovement(gamepad_number, GAMEPAD_AXIS_LEFT_Y);
+
+			dev->state.direction = direction;
+
+			dev->state.buttons[VIRTUAL_BUTTON_ACTION].is_down = IsGamepadButtonDown(gamepad_number, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
+			dev->state.buttons[VIRTUAL_BUTTON_ACTION].is_pressed = IsGamepadButtonPressed(gamepad_number, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
+			dev->state.buttons[VIRTUAL_BUTTON_ACTION].is_released = IsGamepadButtonReleased(gamepad_number, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
+		}
+		else {
+			
+			Vector2 direction = {0.0f, 0.0f};
+
+			if (IsKeyDown(dev->keys.key_left))  direction.x  = -1.0f;
+			if (IsKeyDown(dev->keys.key_right)) direction.x +=  1.0f;
+			if (IsKeyDown(dev->keys.key_up))    direction.y  = -1.0f;
+			if (IsKeyDown(dev->keys.key_down))  direction.y +=  1.0f;
+
+			dev->state.direction = direction;
+			dev->state.buttons[VIRTUAL_BUTTON_ACTION].is_down = IsKeyDown(dev->keys.key_action);
+			dev->state.buttons[VIRTUAL_BUTTON_ACTION].is_pressed = IsKeyPressed(dev->keys.key_action);
+			dev->state.buttons[VIRTUAL_BUTTON_ACTION].is_released = IsKeyReleased(dev->keys.key_action);
+
+			dev->state.buttons[VIRTUAL_BUTTON_MENU].is_down = IsKeyDown(dev->keys.key_menu);
+			dev->state.buttons[VIRTUAL_BUTTON_MENU].is_pressed = IsKeyPressed(dev->keys.key_menu);
+			dev->state.buttons[VIRTUAL_BUTTON_MENU].is_released = IsKeyReleased(dev->keys.key_menu);
+		}
+	}
+}
+
 int main(void)
 {
 #ifdef __APPLE__
@@ -475,17 +554,37 @@ int main(void)
 	Game_State *game_state = calloc(1, sizeof(*game_state));
 	assert(game_state);
 
+	// Init input devices
+	{
+		Virtual_Input_Device *d = &game_state->input_devices[0];
+		d->use_gamepad = true;
+		d->gamepad.gamepad_number = 0;
+		d->keys.key_left = KEY_LEFT;
+		d->keys.key_right = KEY_RIGHT;
+		d->keys.key_up = KEY_UP;
+		d->keys.key_down = KEY_DOWN;
+		d->keys.key_action = KEY_RIGHT_CONTROL;
+		d->keys.key_menu = KEY_ESCAPE;
+
+		d = &game_state->input_devices[1];
+		d->use_gamepad = false;
+		d->gamepad.gamepad_number = 1;
+		d->keys.key_left = KEY_A;
+		d->keys.key_right = KEY_D;
+		d->keys.key_up = KEY_W;
+		d->keys.key_down = KEY_S;
+		d->keys.key_action = KEY_LEFT_CONTROL;
+		d->keys.key_menu = KEY_ESCAPE;
+	}
+
+	// Init player parameters
 	{
 		Player_Parameters *p;
 
 		p = &game_state->players[0].params;
 
 		*p = default_player_params;
-		p->key_left = KEY_LEFT;
-		p->key_right = KEY_RIGHT;
-		p->key_up = KEY_UP;
-		p->key_down = KEY_DOWN;
-		p->key_action = KEY_RIGHT_CONTROL;
+		p->input_device_index = 0;
 		p->key_text = "Arrow Keys + Right CTRL";
 		p->sound_pop = LoadSound("resources/player_1_pop.wav");
 		p->sound_hit = LoadSound("resources/player_1_hit.wav");
@@ -494,11 +593,7 @@ int main(void)
 		p = &game_state->players[1].params;
 
 		*p = default_player_params;
-		p->key_left = KEY_A;
-		p->key_right = KEY_D;
-		p->key_up = KEY_W;
-		p->key_down = KEY_S;
-		p->key_action = KEY_LEFT_CONTROL;
+		p->input_device_index = 1;
 		p->key_text = "W,A,S,D + Left CTRL";
 		p->sound_pop = LoadSound("resources/player_2_pop.wav");
 		p->sound_hit = LoadSound("resources/player_2_hit.wav");
@@ -577,6 +672,10 @@ int main(void)
 			view = get_updated_view();
 		}
 
+		Virtual_Input_Device *input_devices = game_state->input_devices;
+
+		virtual_input_update_devices(input_devices);
+
 		// Update
 		//-----------------------------------------------------
 
@@ -654,14 +753,9 @@ int main(void)
 
 				Player *player = game_state->players + player_index;
 
-				Vector2 control = {0.0f, 0.0f};
-
 				Player_Parameters *parameters = &player->params;
-
-				if (IsKeyDown(parameters->key_left))  control.x  = -1.0f;
-				if (IsKeyDown(parameters->key_right)) control.x +=  1.0f;
-				if (IsKeyDown(parameters->key_up))    control.y  = -1.0f;
-				if (IsKeyDown(parameters->key_down))  control.y +=  1.0f;
+				Virtual_Input_Device_State input = input_devices[parameters->input_device_index].state;
+				Vector2 control = input.direction;
 
 				float friction_fraction = 1.0f;
 
@@ -703,14 +797,14 @@ int main(void)
 				//
 				if (player->shoot_time_out < game_state->game_play_time) {
 
-					if (IsKeyDown(parameters->key_action) && player->shoot_charge_t < 1.0f) {
+					if (input.buttons[VIRTUAL_BUTTON_ACTION].is_down && player->shoot_charge_t < 1.0f) {
 						float full_charges_per_second = 1.5f;
 						player->shoot_charge_t += full_charges_per_second * dt;
 						if (player->shoot_charge_t > 1.0f) {
 							player->shoot_charge_t = 1.0f;
 						}
 					}
-					else if (IsKeyReleased(parameters->key_action)) {
+					else if (input.buttons[VIRTUAL_BUTTON_ACTION].is_released) {
 						float shoot_cooldown_seconds = 1.0f;
 						player->shoot_time_out = game_state->game_play_time + shoot_cooldown_seconds;
 
