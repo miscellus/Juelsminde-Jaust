@@ -408,7 +408,18 @@ static void virtual_input_update_devices(Virtual_Input_Device *input_devices) {
 
 		if (dev->use_gamepad) {
 			// TODO(jakob)
-			
+			int gamepad_number = dev->gamepad.gamepad_number;
+
+			Vector2 direction = {0.0f, 0.0f};
+
+			direction.x = GetGamepadAxisMovement(gamepad_number, GAMEPAD_AXIS_LEFT_X);
+            direction.y = GetGamepadAxisMovement(gamepad_number, GAMEPAD_AXIS_LEFT_Y);
+
+			dev->state.direction = direction;
+
+			dev->state.buttons[VIRTUAL_BUTTON_ACTION].is_down = IsGamepadButtonDown(gamepad_number, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
+			dev->state.buttons[VIRTUAL_BUTTON_ACTION].is_pressed = IsGamepadButtonPressed(gamepad_number, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
+			dev->state.buttons[VIRTUAL_BUTTON_ACTION].is_released = IsGamepadButtonReleased(gamepad_number, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
 		}
 		else {
 			
