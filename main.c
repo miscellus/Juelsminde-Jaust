@@ -408,6 +408,7 @@ static void virtual_input_update_devices(Virtual_Input_Device *input_devices) {
 
 		if (dev->use_gamepad) {
 			// TODO(jakob)
+			
 		}
 		else {
 			
@@ -478,22 +479,24 @@ int main(void)
 	// Init input devices
 	{
 		Virtual_Input_Device *d = &game_state->input_devices[0];
+		d->use_gamepad = true;
+		d->gamepad.gamepad_number = 0;
 		d->keys.key_left = KEY_LEFT;
 		d->keys.key_right = KEY_RIGHT;
 		d->keys.key_up = KEY_UP;
 		d->keys.key_down = KEY_DOWN;
 		d->keys.key_action = KEY_RIGHT_CONTROL;
 		d->keys.key_menu = KEY_ESCAPE;
-		d->gamepad.gamepad_number = 0;
 
 		d = &game_state->input_devices[1];
+		d->use_gamepad = false;
+		d->gamepad.gamepad_number = 1;
 		d->keys.key_left = KEY_A;
 		d->keys.key_right = KEY_D;
 		d->keys.key_up = KEY_W;
 		d->keys.key_down = KEY_S;
 		d->keys.key_action = KEY_LEFT_CONTROL;
 		d->keys.key_menu = KEY_ESCAPE;
-		d->gamepad.gamepad_number = 1;
 	}
 
 	// Init player parameters
