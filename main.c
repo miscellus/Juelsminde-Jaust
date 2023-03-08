@@ -22,6 +22,8 @@
 #define MINIMUM(a, b) ((a) < (b) ? (a) : (b))
 #define MAXIMUM(a, b) ((a) > (b) ? (a) : (b))
 
+#define UNUSED(var) ((void)(var))
+
 typedef struct View {
 	float width;
 	float height;
@@ -58,26 +60,28 @@ typedef struct Virtual_Input_Device_State {
 	Virtual_Input_Button buttons[VIRTUAL_BUTTON_COUNT];
 } Virtual_Input_Device_State;
 
+typedef struct Virtual_Input_Key_Map {
+	KeyboardKey key_left;
+	KeyboardKey key_right;
+	KeyboardKey key_up;
+	KeyboardKey key_down;
+	KeyboardKey key_action;
+	KeyboardKey key_menu;
+} Virtual_Input_Key_Map;
+
 typedef struct Virtual_Input_Device {
 	bool use_gamepad;
 	struct {
+		bool available;
 		int gamepad_number;
 	} gamepad;
 
-	struct {
-		KeyboardKey key_left;
-		KeyboardKey key_right;
-		KeyboardKey key_up;
-		KeyboardKey key_down;
-		KeyboardKey key_action;
-		KeyboardKey key_menu;
-	} keys;
-
+	Virtual_Input_Key_Map keys;
 	Virtual_Input_Device_State state;
 } Virtual_Input_Device;
 
 typedef struct Player_Parameters {
-	int input_device_index;
+	Virtual_Input_Device *input_device;
 
 	const char *key_text;
 	Sound sound_pop;
@@ -460,12 +464,63 @@ float _lerp_angle(float a, float b, float t) {
 	return result;
 }
 
-static void virtual_input_update_devices(Virtual_Input_Device *input_devices) {
+static const Virtual_Input_Key_Map global_key_maps[] = {
+	{
+		KEY_LEFT,
+		KEY_RIGHT,
+		KEY_UP,
+		KEY_DOWN,
+		KEY_RIGHT_CONTROL,
+		KEY_ESCAPE,
+	},
+	{
+		KEY_A,
+		KEY_D,
+		KEY_W,
+		KEY_S,
+		KEY_LEFT_CONTROL,
+		KEY_ESCAPE,
+	},
+	{
+		KEY_J,
+		KEY_L,
+		KEY_I,
+		KEY_K,
+		KEY_U,
+		KEY_ESCAPE,
+	},
+	{
+		KEY_KP_4,
+		KEY_KP_6,
+		KEY_KP_8,
+		KEY_KP_5,
+		KEY_KP_7,
+		KEY_ESCAPE,
+	},
+};
+
+static void virtual_input_init(Virtual_Input_Device *input_devices) {
+	for (int device_index = 0; device_index < NUM_INPUT_DEVICES; ++device_index) {
+		Virtual_Input_Device *dev = &input_devices[device_index];
+
+		dev->gamepad.available = false;
+		dev->use_gamepad = true; // @hardcode TODO(jakob): Make this configurable from menu
+		dev->gamepad.gamepad_number = device_index;
+		dev->keys = global_key_maps[device_index];
+		dev->state = (Virtual_Input_Device_State){0};
+	}
+}
+
+
+static void virtual_input_update(Virtual_Input_Device *input_devices) {
 	for (int device_index = 0; device_index < NUM_INPUT_DEVICES; ++device_index) {
 
 		Virtual_Input_Device *dev = &input_devices[device_index];
 
+
 		if (dev->use_gamepad) {
+			dev->gamepad.available = IsGamepadAvailable(device_index);
+
 			// TODO(jakob)
 			int gamepad_number = dev->gamepad.gamepad_number;
 
@@ -501,6 +556,23 @@ static void virtual_input_update_devices(Virtual_Input_Device *input_devices) {
 	}
 }
 
+static void read_file_into_c_string(const char *filepath, char **contents_out, size_t *file_size_out) {
+	FILE *file = fopen(filepath, "rb");
+
+	fseek(file, 0, SEEK_END);
+	*file_size_out = ftell(file);
+	fseek(file, 0, SEEK_SET);
+
+	*contents_out = calloc(1, *file_size_out + 1);
+
+	fread(*contents_out, *file_size_out, 1, file);
+
+	fclose(file);
+}
+
+extern int glfwUpdateGamepadMappings(const char *string);
+extern int glfwGetError(const char **description);
+
 int main(void)
 {
 #ifdef __APPLE__
@@ -518,6 +590,16 @@ int main(void)
 	}
 #endif
 
+
+#if 0
+	{
+		int major, minor, rev;
+		glfwGetVersion(&major, &minor, &rev);
+
+		fprintf(stderr, "GLFW Version: %d.%d.%d\n", major, minor, rev);
+		exit(0);
+	}
+#endif
 
 	uint64_t random_state = time(0);
 
@@ -554,50 +636,31 @@ int main(void)
 	Game_State *game_state = calloc(1, sizeof(*game_state));
 	assert(game_state);
 
-	// Init input devices
-	{
-		Virtual_Input_Device *d = &game_state->input_devices[0];
-		d->use_gamepad = true;
-		d->gamepad.gamepad_number = 0;
-		d->keys.key_left = KEY_LEFT;
-		d->keys.key_right = KEY_RIGHT;
-		d->keys.key_up = KEY_UP;
-		d->keys.key_down = KEY_DOWN;
-		d->keys.key_action = KEY_RIGHT_CONTROL;
-		d->keys.key_menu = KEY_ESCAPE;
+	Virtual_Input_Device *input_devices = game_state->input_devices;
 
-		d = &game_state->input_devices[1];
-		d->use_gamepad = false;
-		d->gamepad.gamepad_number = 1;
-		d->keys.key_left = KEY_A;
-		d->keys.key_right = KEY_D;
-		d->keys.key_up = KEY_W;
-		d->keys.key_down = KEY_S;
-		d->keys.key_action = KEY_LEFT_CONTROL;
-		d->keys.key_menu = KEY_ESCAPE;
-	}
+	virtual_input_init(input_devices);
 
 	// Init player parameters
 	{
-		Player_Parameters *p;
+		Player_Parameters *params;
 
-		p = &game_state->players[0].params;
+		params = &game_state->players[0].params;
 
-		*p = default_player_params;
-		p->input_device_index = 0;
-		p->key_text = "Arrow Keys + Right CTRL";
-		p->sound_pop = LoadSound("resources/player_1_pop.wav");
-		p->sound_hit = LoadSound("resources/player_1_hit.wav");
-		p->color = (Color){240.0f, 120.0f, 0.0f, 255.0f};
+		*params = default_player_params;
+		params->input_device = &input_devices[0];
+		params->key_text = "Arrow Keys + Right CTRL";
+		params->sound_pop = LoadSound("resources/player_1_pop.wav");
+		params->sound_hit = LoadSound("resources/player_1_hit.wav");
+		params->color = (Color){240.0f, 120.0f, 0.0f, 255.0f};
 
-		p = &game_state->players[1].params;
+		params = &game_state->players[1].params;
 
-		*p = default_player_params;
-		p->input_device_index = 1;
-		p->key_text = "W,A,S,D + Left CTRL";
-		p->sound_pop = LoadSound("resources/player_2_pop.wav");
-		p->sound_hit = LoadSound("resources/player_2_hit.wav");
-		p->color = (Color){0.0f, 120.0f, 240.0f, 255.0f};
+		*params = default_player_params;
+		params->input_device = &input_devices[1];
+		params->key_text = "W,A,S,D + Left CTRL";
+		params->sound_pop = LoadSound("resources/player_2_pop.wav");
+		params->sound_hit = LoadSound("resources/player_2_hit.wav");
+		params->color = (Color){0.0f, 120.0f, 240.0f, 255.0f};
 	}
 	game_state->sound_win = LoadSound("resources/win.wav");
 
@@ -660,11 +723,29 @@ int main(void)
 	SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
 	//----------------------------------------------------------
 
+
+#if 1
+	{
+		char *custom_sdl_gamepad_mappings;
+		size_t contents_length;
+		read_file_into_c_string("resources/gamecontrollerdb.txt", &custom_sdl_gamepad_mappings, &contents_length);
+		printf("%.*s\n", (int)contents_length, custom_sdl_gamepad_mappings);
+		// SetGamepadMappings("03000000c62400002a54000001010000,PowerA Xbox One Spectra Infinity,a:b0,b:b1,back:b6,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,leftshoulder:b4,leftstick:b9,lefttrigger:a2,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b10,righttrigger:a5,rightx:a3,righty:a4,start:b7,x:b2,y:b3,platform:Linux,");
+		// SetGamepadMappings("030000005e040000a002000000010000,Generic X-Box pad Piranha,a:b0,b:b1,back:b6,dpdown:h0.1,dpleft:h0.2,dpright:h0.8,dpup:h0.4,leftshoulder:b4,leftstick:b9,lefttrigger:a2,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b10,righttrigger:a5,rightx:a3,righty:a4,start:b7,x:b2,y:b3,platform:Linux,");
+
+		int success = glfwUpdateGamepadMappings(custom_sdl_gamepad_mappings);
+		if (!success) {
+			const char *error_str = NULL;
+			int code = glfwGetError(&error_str);
+			printf("GLFW_ERROR (%d): %s\n", code, error_str);
+		}
+	}
+#endif
+
 	game_state->running = true;
 
 	// Main game loop
-	while (game_state->running)    // Detect window close button or ESC key
-	{
+	while (game_state->running) {   // Detect window close button or ESC key
 		float dt = game_state->time_scale * GetFrameTime();
 		bool window_resized = IsWindowResized();
 
@@ -672,9 +753,7 @@ int main(void)
 			view = get_updated_view();
 		}
 
-		Virtual_Input_Device *input_devices = game_state->input_devices;
-
-		virtual_input_update_devices(input_devices);
+		virtual_input_update(input_devices);
 
 		// Update
 		//-----------------------------------------------------
@@ -751,10 +830,9 @@ int main(void)
 			// Update player input and velocity
 			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
 
-				Player *player = game_state->players + player_index;
+				Player *player = &game_state->players[player_index];
 
-				Player_Parameters *parameters = &player->params;
-				Virtual_Input_Device_State input = input_devices[parameters->input_device_index].state;
+				Virtual_Input_Device_State input = player->params.input_device->state;
 				Vector2 control = input.direction;
 
 				float friction_fraction = 1.0f;
@@ -1013,7 +1091,7 @@ int main(void)
 					bullet->position = Vector2Add(bullet_position, Vector2Scale(bullet->velocity, dt));
 
 					// TODO(jakob): Spin moves
-					bullet->velocity = Vector2Rotate(bullet->velocity, bullet->spin);
+					bullet->velocity = Vector2Rotate(bullet->velocity, bullet->spin * dt);
 
 					float bullet_radius = player->params.bullet_radius;
 					bool bullet_overlaps_opponent = CheckCollisionCircles(bullet_position, bullet_radius, opponent->position, opponent_radius);
@@ -1541,6 +1619,32 @@ int main(void)
 		}
 
 		// DrawFPS(view_width-100, 10);
+
+		{
+			float font_size = 20*view.scale;
+			float font_spacing = font_size*FONT_SPACING_FOR_SIZE;
+
+			for (int i = 0; i < 16; ++i) {
+				// Virtual_Input_Device *dev = &input_devices[i];
+
+				bool is_present = glfwJoystickPresent(i);
+				bool is_joystick = glfwJoystickIsGamepad(i);
+
+				Vector2 pos = (Vector2){25.0f*view.scale, (10.0f + i*20.0f)*view.scale};
+
+				DrawTextEx(default_font, is_present ? "^" : "v", pos, font_size, font_spacing, BLACK);
+				pos.x += 15.0f*view.scale;
+
+				DrawTextEx(default_font, is_joystick ? "J" : "?", pos, font_size, font_spacing, BLACK);
+				pos.x += 15.0f*view.scale;
+
+				for (int j = 0; j < 16; ++j) {
+					bool button_down = IsGamepadButtonDown(i, j);
+					DrawTextEx(default_font, button_down ? "_" : "#", pos, font_size, font_spacing, BLACK);
+					pos.x += 15.0f*view.scale;
+				}
+			}
+		}
 
 		EndDrawing();
 		//-----------------------------------------------------
