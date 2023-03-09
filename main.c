@@ -90,7 +90,7 @@ typedef struct Player_Parameters {
 	float minimum_radius;
 	float acceleration_force;
 	float friction;
-	float comback_base_factor;
+	float comeback_base_factor; // TODO(jakob) spell comeback -> comeback
 
 	float bullet_energy_cost_ring;
 	float bullet_energy_cost_fan;
@@ -111,7 +111,7 @@ static const Player_Parameters default_player_params = {
 	.bullet_time_end_fade = 7.0f,
 	.bullet_time_begin_fade = (7.0f-0.4f),
 
-	.comback_base_factor = 1.0f, // NOTE(jakob & patrick): energy_gained = xxxx + comback_base_factor*(1.0f - ((float)health/(float)starting_health))
+	.comeback_base_factor = 1.0f, // NOTE(jakob & patrick): energy_gained = xxxx + comeback_base_factor*(1.0f - ((float)health/(float)starting_health))
 };
 
 typedef struct Player {
@@ -208,9 +208,9 @@ float calculate_player_radius(Player *player) {
 	return player->params.minimum_radius + player->energy*1.2f;
 }
 
-float calculate_player_comback_factor(Player *player) {
+float calculate_player_comeback_factor(Player *player) {
 	Player_Parameters *parameters = &player->params;
-	float result = parameters->comback_base_factor*(1.0f - ((float)player->health / (float)parameters->starting_health));
+	float result = parameters->comeback_base_factor*(1.0f - ((float)player->health / (float)parameters->starting_health));
 	return result;
 }
 
@@ -276,8 +276,8 @@ void spawn_bullet_ring_ex(Player *player, uint64_t *random_state, int count, flo
 
 void spawn_bullet_ring(Player *player, uint64_t *random_state) {
 
-	float comback_factor = calculate_player_comback_factor(player);
-	int count = (int)((player->energy * (0.5f + 0.5f*comback_factor)) / player->params.bullet_energy_cost_ring);
+	float comeback_factor = calculate_player_comeback_factor(player);
+	int count = (int)((player->energy * (0.5f + 0.5f*comeback_factor)) / player->params.bullet_energy_cost_ring);
 	float speed = 50.0f + Vector2LengthSqr(player->velocity)/1565.0f;
 	float spin = 0.3f*player->angular_velocity;
 	spawn_bullet_ring_ex(player, random_state, count, speed, spin);
@@ -413,6 +413,15 @@ View get_updated_view(void) {
 	result.screen_width = width;
 	result.screen_height = height;
 	return result;
+}
+
+static void calculate_bullet_count_and_angle_span(Player *player, int *count_out, float *angle_span_out) {
+	float narrow_angle_span = 2.0*PI / 60.0f;
+	float wide_angle_span = 2.0*PI / 4.0f;
+	float t = player->shoot_charge_t;
+	float comeback_factor = calculate_player_comeback_factor(player);
+	*count_out = (player->energy * (0.25f + 0.75f*comeback_factor)) / player->params.bullet_energy_cost_fan;
+	*angle_span_out = Lerp(wide_angle_span, narrow_angle_span, t);
 }
 
 float shortest_angle_difference(float a, float b) {
@@ -910,16 +919,8 @@ int main(void)
 						player->shoot_time_out = game_state->game_play_time + shoot_cooldown_seconds;
 
 						float t = player->shoot_charge_t;
-						float comback_factor = calculate_player_comback_factor(player);
-						float speed = 50.0f + (400.0f + comback_factor*650.0f)*player->shoot_charge_t;
-						float angle_span;
-						{
-							float narrow_angle_span = 2.0*PI / 60.0f;
-							float wide_angle_span = 2.0*PI / 4.0f;
-							angle_span = (1.0f-t)*wide_angle_span + t*narrow_angle_span;
-						}
-
-						// speed *= 1.0f + player->shoot_charge_t * 2.5f;
+						float comeback_factor = calculate_player_comeback_factor(player);
+						float speed = 50.0f + (400.0f + comeback_factor*650.0f)*player->shoot_charge_t;
 
 						Vector2 shoot_vector = (Vector2){cosf(player->shoot_angle), sinf(player->shoot_angle)};
 
@@ -929,9 +930,11 @@ int main(void)
 							recoil_factor = 0;
 						}
 
-						int count = (player->energy * (0.25f + 0.75f*comback_factor)) / player->params.bullet_energy_cost_fan;
+						float angle_span;
+						int bullet_count;
+						calculate_bullet_count_and_angle_span(player, &bullet_count, &angle_span);
 
-						spawn_bullet_fan(player, count, speed, angle_span);
+						spawn_bullet_fan(player, bullet_count, speed, angle_span);
 
 						acceleration = Vector2Subtract(acceleration, Vector2Scale(shoot_vector, speed*recoil_factor));
 
@@ -1104,8 +1107,8 @@ int main(void)
 
 				float speed = Vector2Length(player->velocity);
 
-				float comback_energy = calculate_player_comback_factor(player);
-				player->energy += dt * (speed * (1 + comback_energy)) / (player->energy*2.0f + 1.0f);
+				float comeback_energy = calculate_player_comeback_factor(player);
+				player->energy += dt * (speed * (1 + comeback_energy)) / (player->energy*2.0f + 1.0f);
 
 				if (player->hit_animation_t < 1.0f) {
 					player->hit_animation_t += dt*4.0f;
@@ -1458,9 +1461,38 @@ int main(void)
 			DrawCircleV(player_position_screen, player_radius_screen, parameters->color);
 
 			// Draw player's move direction arrow
-			{
+			if (1) {
+				float angle_span;
+				int spear_count;
+				calculate_bullet_count_and_angle_span(player, &spear_count, &angle_span);
 
+				float pointiness = Lerp(15.0f, 50.0f, player->shoot_charge_t);
+				float half_spear_width = PI/16.0f + 0.5f*angle_span;
 
+				float angle_quantum = angle_span / (float)spear_count;
+				float angle = player->shoot_angle - 0.5f*angle_span + 0.5f*angle_quantum;
+
+				for (int i = 0; i < spear_count; ++i) {
+					float angle1 = angle - half_spear_width;
+					float angle2 = angle + half_spear_width;
+
+					Vector2 arrow_point = (Vector2){cosf(angle), sinf(angle)};
+					Vector2 arrow_left = (Vector2){cosf(angle1), sinf(angle1)};
+					Vector2 arrow_right = (Vector2){cosf(angle2), sinf(angle2)};
+					arrow_point = Vector2Scale(arrow_point, view.scale*(player_radius + pointiness));
+					arrow_left = Vector2Scale(arrow_left, player_radius_screen);
+					arrow_right = Vector2Scale(arrow_right, player_radius_screen);
+					arrow_point = Vector2Add(arrow_point, player_position_screen);
+					arrow_left = Vector2Add(arrow_left, player_position_screen);
+					arrow_right = Vector2Add(arrow_right, player_position_screen);
+					// DrawCircleV(spot, player_radius*0.2f, parameters->color);
+
+					DrawTriangle(arrow_right, arrow_point, arrow_left, parameters->color);
+					
+					angle += angle_quantum;
+				}
+			}
+			else {
 				float angle_offset;
 				float pointiness;
 				{
@@ -1710,6 +1742,7 @@ int main(void)
 
 		// DrawFPS(view_width-100, 10);
 
+#if 0
 		{
 			float font_size = 20*view.scale;
 			float font_spacing = font_size*FONT_SPACING_FOR_SIZE;
@@ -1735,6 +1768,7 @@ int main(void)
 				}
 			}
 		}
+#endif
 
 		EndDrawing();
 		//-----------------------------------------------------
