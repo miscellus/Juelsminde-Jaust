@@ -177,8 +177,9 @@ typedef struct Game_State {
 	bool running;
 	bool show_menu;
 
-#define NUM_INPUT_DEVICES 2 // @hardcode
-	Virtual_Input_Device input_devices[NUM_INPUT_DEVICES];
+#define MAX_ACTIVE_INPUT_DEVICES 4
+#define NUM_INPUT_DEVICES 3 // @hardcode
+	Virtual_Input_Device input_devices[MAX_ACTIVE_INPUT_DEVICES];
 
 	Sound sound_win;
 	int triumphant_player;
@@ -855,9 +856,7 @@ int main(void)
 					float control_angle = atan2f(control.y, control.x);
 
 					// Normalize player movement controls
-					float control_inv_length = 1.0f/sqrtf(control.x*control.x + control.y*control.y);
-					control.x *= control_inv_length;
-					control.y *= control_inv_length;
+					control = Vector2NormalizeOrZero(control);
 
 					float old_angle = player->shoot_angle;
 					player->shoot_angle = lerp_angle(player->shoot_angle, control_angle, 3.0f * dt);
@@ -999,72 +998,63 @@ int main(void)
 					Vector2Scale(player->velocity, dt)
 				);
 
-				for (int opponent_index = 0; opponent_index < NUM_PLAYERS; ++opponent_index) {
-					if (opponent_index == player_index) continue;
+				// Bounce on view edges
+				{
+					float bounce_back_factor = -0.6f;
+					float edge_offset;
 
-					Player *opponent = game_state->players + opponent_index;
+					float cumulative_edge_bounce = 0.0f;
 
+					if (player->velocity.x > 0) {
+						edge_offset = view.width - (target_position.x + player_radius);
 
-					float opponent_radius = calculate_player_radius(opponent);
+						if (edge_offset < 0) {
+							target_position.x = view.width - player_radius;
 
-					// Bounce on view edges
-					{
-						float bounce_back_factor = -0.6f;
-						float edge_offset;
+							cumulative_edge_bounce += fabs(player->velocity.x);
 
-						float cumulative_edge_bounce = 0.0f;
-
-						if (player->velocity.x > 0) {
-							edge_offset = view.width - (target_position.x + player_radius);
-
-							if (edge_offset < 0) {
-								target_position.x = view.width - player_radius;
-
-								cumulative_edge_bounce += fabs(player->velocity.x);
-
-								player->velocity.x = bounce_back_factor*(player->velocity.x + edge_offset);
-							}
+							player->velocity.x = bounce_back_factor*(player->velocity.x + edge_offset);
 						}
-						else {
-							edge_offset = (target_position.x - player_radius) - 0;
+					}
+					else {
+						edge_offset = (target_position.x - player_radius) - 0;
 
-							if (edge_offset < 0) {
-								target_position.x = 0 + player_radius;
+						if (edge_offset < 0) {
+							target_position.x = 0 + player_radius;
 
-								cumulative_edge_bounce += fabs(player->velocity.x);
+							cumulative_edge_bounce += fabs(player->velocity.x);
 
-								player->velocity.x = bounce_back_factor*(player->velocity.x + edge_offset);
-							}
+							player->velocity.x = bounce_back_factor*(player->velocity.x + edge_offset);
 						}
+					}
 
-						if (player->velocity.y > 0) {
+					if (player->velocity.y > 0) {
 
-							edge_offset = view.height - (target_position.y + player_radius);
+						edge_offset = view.height - (target_position.y + player_radius);
 
-							if (edge_offset < 0) {
-								target_position.y = view.height - player_radius;
+						if (edge_offset < 0) {
+							target_position.y = view.height - player_radius;
 
-								cumulative_edge_bounce += fabs(player->velocity.y);
+							cumulative_edge_bounce += fabs(player->velocity.y);
 
-								player->velocity.y = bounce_back_factor*(player->velocity.y + edge_offset);
+							player->velocity.y = bounce_back_factor*(player->velocity.y + edge_offset);
 
-							}
 						}
-						else {
-							edge_offset = (target_position.y - player_radius) - 0;
+					}
+					else {
+						edge_offset = (target_position.y - player_radius) - 0;
 
-							if (edge_offset < 0) {
-								target_position.y = 0 + player_radius;
+						if (edge_offset < 0) {
+							target_position.y = 0 + player_radius;
 
-								cumulative_edge_bounce += fabs(player->velocity.y);
+							cumulative_edge_bounce += fabs(player->velocity.y);
 
-								player->velocity.y = bounce_back_factor*(player->velocity.y + edge_offset);
-							}
+							player->velocity.y = bounce_back_factor*(player->velocity.y + edge_offset);
 						}
+					}
 
-						if (hit_is_hard_enough(cumulative_edge_bounce)) {
-							spawn_bullet_ring(player, &random_state);
-						}
+					if (hit_is_hard_enough(cumulative_edge_bounce)) {
+						spawn_bullet_ring(player, &random_state);
 					}
 				}
 
@@ -1390,6 +1380,7 @@ int main(void)
 			float font_spacing = font_size*FONT_SPACING_FOR_SIZE;
 
 			Vector2 player_position_screen = Vector2Scale(player->position, view.scale);
+			// printf("Player(%d) Pos: {%.2f,%.2f}\n", player_index, player_position_screen.x, player_position_screen.y);
 
 			// Draw player's body
 			DrawCircleV(player_position_screen, player_radius_screen, parameters->color);
