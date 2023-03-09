@@ -116,6 +116,7 @@ static const Player_Parameters default_player_params = {
 typedef struct Player {
 	Vector2 position;
 	Vector2 velocity;
+	float angular_velocity;
 	float shoot_angle;
 	int health;
 	float energy;
@@ -123,7 +124,6 @@ typedef struct Player {
 	float shoot_time_out;
 	float hit_animation_t;
 	float shoot_charge_t;
-	float angular_velocity;
 #define MAX_ACTIVE_BULLETS 2048
 	int active_bullets;
 	Bullet bullets[MAX_ACTIVE_BULLETS];
@@ -257,7 +257,7 @@ void spawn_bullet_ring(Player *player, uint64_t *random_state) {
 		bullet->position = player->position;
 		bullet->velocity = Vector2Scale((Vector2){cosf(angle), sinf(angle)}, speed);
 		bullet->time = 0;
-		bullet->spin = 0.3f * player->angular_velocity;
+		bullet->spin = 0.3f*player->angular_velocity;
 		angle += angle_quantum;
 	}
 
@@ -290,7 +290,7 @@ void spawn_bullet_fan(Player *player, int count, float speed, float angle_span) 
 		bullet->velocity = Vector2Scale((Vector2){cosf(angle), sinf(angle)}, speed);
 		bullet->velocity = Vector2Add(bullet->velocity, quater_player_velocity);
 		bullet->time = 0;
-		bullet->spin = 0.3f * player->angular_velocity;
+		bullet->spin = 0.3f*player->angular_velocity;
 		angle += angle_quantum;
 	}
 
@@ -419,6 +419,8 @@ float lerp_angle(float a, float b, float t) {
 }
 
 int menu_action_toggle_fullscreen(int change, char *user_data) {
+	UNUSED(change);
+	UNUSED(user_data);
 	// bool *is_fullscreen = (bool *)user_data;
 
 	// *is_fullscreen = !*is_fullscreen;
@@ -426,7 +428,7 @@ int menu_action_toggle_fullscreen(int change, char *user_data) {
 	ToggleFullscreen();
 
 	return 0;
-};
+}
 
 float _lerp_angle(float a, float b, float t) {
 	// From https://gist.github.com/itsmrpeck/be41d72e9d4c72d2236de687f6f53974
@@ -842,28 +844,20 @@ int main(void)
 				}
 				else {
 
-					// NOTE(jakob): atan2 lookup table
-					float control_angle = ((float[3][3]){
-						{-2.356194490192345f, 3.141592653589793f, 2.356194490192345f},
-						{-1.5707963267948966f, 0.0f, 1.5707963267948966f},
-						{-0.7853981633974483f, 0.0f, 0.7853981633974483f},
-					})[(int)control.x+1][(int)control.y+1];
+					float control_angle = atan2f(control.y, control.x);
 
-					if (control.x != 0.0f && control.y != 0.0f) {
-						// Normalize player movement controls
-						control = Vector2Scale(control, INV_SQRT_TWO);
-					}
-
+					// Normalize player movement controls
+					float control_inv_length = 1.0f/sqrtf(control.x*control.x + control.y*control.y);
+					control.x *= control_inv_length;
+					control.y *= control_inv_length;
 
 					float old_angle = player->shoot_angle;
+					player->shoot_angle = lerp_angle(player->shoot_angle, control_angle, 3.0f * dt);
 
-					player->shoot_angle = lerp_angle(old_angle, control_angle, 4.0f * dt);
+					float angular_pulse = 10.0f*shortest_angle_difference(old_angle, player->shoot_angle);
 
-					float angular_difference = shortest_angle_difference(old_angle, player->shoot_angle);
+					player->angular_velocity = 0.5f*player->angular_velocity + 0.5f*angular_pulse;
 
-					angular_difference *= 10.0f;
-
-					player->angular_velocity = 0.5f*player->angular_velocity + 0.5f*angular_difference;
 				}
 
 				Vector2 acceleration = Vector2Scale(control, player->params.acceleration_force * dt);
@@ -1090,8 +1084,8 @@ int main(void)
 
 					bullet->position = Vector2Add(bullet_position, Vector2Scale(bullet->velocity, dt));
 
-					// TODO(jakob): Spin moves
-					bullet->velocity = Vector2Rotate(bullet->velocity, bullet->spin * dt);
+					// This enables spin moves
+					bullet->velocity = Vector2Rotate(bullet->velocity, dt*bullet->spin);
 
 					float bullet_radius = player->params.bullet_radius;
 					bool bullet_overlaps_opponent = CheckCollisionCircles(bullet_position, bullet_radius, opponent->position, opponent_radius);
