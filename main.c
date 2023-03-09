@@ -186,8 +186,9 @@ typedef struct Game_State {
 	float time_scale;
 	bool game_in_progress;
 	float game_play_time;
-#define NUM_PLAYERS 2
-	Player players[NUM_PLAYERS];
+#define MAX_ACTIVE_PLAYERS 4
+#define NUM_PLAYERS 3
+	Player players[MAX_ACTIVE_PLAYERS];
 #define MAX_ACTIVE_RINGS 128
 	int active_rings;
 	Ring rings[MAX_ACTIVE_RINGS];
@@ -336,19 +337,28 @@ void reset_game(Game_State *game_state, View view) {
 	game_state->game_play_time = 0.0f;
 	game_state->game_in_progress = true;
 
-	Player *p1 = &game_state->players[0];
-	memset(p1, 0, (char *)&p1->params - (char *)p1);
-	p1->position = (Vector2){ view.width * 2.0f/3.0f, view.height / 2.0f };
-	p1->shoot_angle = PI;
-	p1->health = p1->params.starting_health;
-	p1->hit_animation_t = 1.0f;
+	Player *player;
 
-	Player *p2 = &game_state->players[1];
-	memset(p2, 0, (char *)&p2->params - (char *)p2);
-	p2->position = (Vector2){ view.width * 1.0f/3.0f, view.height / 2.0f };
-	p2->shoot_angle = 0.0f;
-	p2->health = p2->params.starting_health;
-	p2->hit_animation_t = 1.0f;
+	player = &game_state->players[0];
+	memset(player, 0, (char *)&player->params - (char *)player);
+	player->position = (Vector2){ view.width * 3.0f/12.0f, view.height / 2.0f };
+	player->shoot_angle = 0.0f;
+	player->health = player->params.starting_health;
+	player->hit_animation_t = 1.0f;
+
+	player = &game_state->players[1];
+	memset(player, 0, (char *)&player->params - (char *)player);
+	player->position = (Vector2){ view.width * 6.0f/12.0f, view.height / 2.0f };
+	player->shoot_angle = PI/2.0f;
+	player->health = player->params.starting_health;
+	player->hit_animation_t = 1.0f;
+
+	player = &game_state->players[2];
+	memset(player, 0, (char *)&player->params - (char *)player);
+	player->position = (Vector2){ view.width * 9.0f/12.0f, view.height / 2.0f };
+	player->shoot_angle = PI;
+	player->health = player->params.starting_health;
+	player->hit_animation_t = 1.0f;
 }
 
 void set_window_to_monitor_dimensions(void) {
@@ -419,12 +429,7 @@ float lerp_angle(float a, float b, float t) {
 int menu_action_toggle_fullscreen(int change, char *user_data) {
 	UNUSED(change);
 	UNUSED(user_data);
-	// bool *is_fullscreen = (bool *)user_data;
-
-	// *is_fullscreen = !*is_fullscreen;
-
 	ToggleFullscreen();
-
 	return 0;
 }
 
@@ -657,6 +662,15 @@ int main(void)
 		params->sound_pop = LoadSound("resources/player_2_pop.wav");
 		params->sound_hit = LoadSound("resources/player_2_hit.wav");
 		params->color = (Color){0.0f, 120.0f, 240.0f, 255.0f};
+
+		params = &game_state->players[2].params;
+
+		*params = default_player_params;
+		params->input_device = &input_devices[2];
+		params->key_text = "I,J,K,L + U";
+		params->sound_pop = LoadSound("resources/player_2_pop.wav");
+		params->sound_hit = LoadSound("resources/player_2_hit.wav");
+		params->color = (Color){40.0f, 240.0f, 80.0f, 255.0f};
 	}
 	game_state->sound_win = LoadSound("resources/win.wav");
 
@@ -701,7 +715,7 @@ int main(void)
 		{MENU_ITEM_INT, "Background (Red)", .u.int_ref = &game_state->color_red},
 		{MENU_ITEM_INT, "Background (Green)", .u.int_ref = &game_state->color_green},
 		{MENU_ITEM_INT, "Background (Blue)", .u.int_ref = &game_state->color_blue},
-		{MENU_ITEM_ACTION, "Full Screen", .action = menu_action_toggle_fullscreen},
+		{MENU_ITEM_ACTION, "Full Screen", .action = menu_action_toggle_fullscreen, .u.int_value = MENU_ACTION_FULLSCREEN_TOGGLE},
 	};
 
 	Menu *menu = &main_menu;
@@ -978,73 +992,79 @@ int main(void)
 			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
 
 				Player *player = game_state->players + player_index;
-				Player *opponent = game_state->players + (1-player_index);
+				float player_radius = calculate_player_radius(player);
 
 				Vector2 target_position = player->position = Vector2Add(
 					player->position,
 					Vector2Scale(player->velocity, dt)
 				);
 
-				float player_radius = calculate_player_radius(player);
-				float opponent_radius = calculate_player_radius(opponent);
+				for (int opponent_index = 0; opponent_index < NUM_PLAYERS; ++opponent_index) {
+					if (opponent_index == player_index) continue;
 
-				// Bounce on view edges
-				{
-					float bounce_back_factor = -0.6f;
-					float edge_offset;
+					Player *opponent = game_state->players + opponent_index;
 
-					float cumulative_edge_bounce = 0.0f;
 
-					if (player->velocity.x > 0) {
-						edge_offset = view.width - (target_position.x + player_radius);
+					float opponent_radius = calculate_player_radius(opponent);
 
-						if (edge_offset < 0) {
-							target_position.x = view.width - player_radius;
+					// Bounce on view edges
+					{
+						float bounce_back_factor = -0.6f;
+						float edge_offset;
 
-							cumulative_edge_bounce += fabs(player->velocity.x);
+						float cumulative_edge_bounce = 0.0f;
 
-							player->velocity.x = bounce_back_factor*(player->velocity.x + edge_offset);
+						if (player->velocity.x > 0) {
+							edge_offset = view.width - (target_position.x + player_radius);
+
+							if (edge_offset < 0) {
+								target_position.x = view.width - player_radius;
+
+								cumulative_edge_bounce += fabs(player->velocity.x);
+
+								player->velocity.x = bounce_back_factor*(player->velocity.x + edge_offset);
+							}
 						}
-					}
-					else {
-						edge_offset = (target_position.x - player_radius) - 0;
+						else {
+							edge_offset = (target_position.x - player_radius) - 0;
 
-						if (edge_offset < 0) {
-							target_position.x = 0 + player_radius;
+							if (edge_offset < 0) {
+								target_position.x = 0 + player_radius;
 
-							cumulative_edge_bounce += fabs(player->velocity.x);
+								cumulative_edge_bounce += fabs(player->velocity.x);
 
-							player->velocity.x = bounce_back_factor*(player->velocity.x + edge_offset);
+								player->velocity.x = bounce_back_factor*(player->velocity.x + edge_offset);
+							}
 						}
-					}
 
-					if (player->velocity.y > 0) {
+						if (player->velocity.y > 0) {
 
-						edge_offset = view.height - (target_position.y + player_radius);
+							edge_offset = view.height - (target_position.y + player_radius);
 
-						if (edge_offset < 0) {
-							target_position.y = view.height - player_radius;
+							if (edge_offset < 0) {
+								target_position.y = view.height - player_radius;
 
-							cumulative_edge_bounce += fabs(player->velocity.y);
+								cumulative_edge_bounce += fabs(player->velocity.y);
 
-							player->velocity.y = bounce_back_factor*(player->velocity.y + edge_offset);
+								player->velocity.y = bounce_back_factor*(player->velocity.y + edge_offset);
 
+							}
 						}
-					}
-					else {
-						edge_offset = (target_position.y - player_radius) - 0;
+						else {
+							edge_offset = (target_position.y - player_radius) - 0;
 
-						if (edge_offset < 0) {
-							target_position.y = 0 + player_radius;
+							if (edge_offset < 0) {
+								target_position.y = 0 + player_radius;
 
-							cumulative_edge_bounce += fabs(player->velocity.y);
+								cumulative_edge_bounce += fabs(player->velocity.y);
 
-							player->velocity.y = bounce_back_factor*(player->velocity.y + edge_offset);
+								player->velocity.y = bounce_back_factor*(player->velocity.y + edge_offset);
+							}
 						}
-					}
 
-					if (hit_is_hard_enough(cumulative_edge_bounce)) {
-						spawn_bullet_ring(player, &random_state);
+						if (hit_is_hard_enough(cumulative_edge_bounce)) {
+							spawn_bullet_ring(player, &random_state);
+						}
 					}
 				}
 
@@ -1078,17 +1098,28 @@ int main(void)
 
 					bullet->position = Vector2Add(bullet_position, Vector2Scale(bullet->velocity, dt));
 
+					if (position_outside_playzone(bullet->position, view)) {
+						player->bullets[bullet_index--] = player->bullets[--player->active_bullets];
+						continue;
+					}
+
 					// This enables spin moves
 					bullet->velocity = Vector2Rotate(bullet->velocity, dt*bullet->spin);
 
 					float bullet_radius = player->params.bullet_radius;
-					bool bullet_overlaps_opponent = CheckCollisionCircles(bullet_position, bullet_radius, opponent->position, opponent_radius);
+					bool destroy_bullet = false;
 
-					if (bullet_overlaps_opponent || position_outside_playzone(bullet_position, view)) {
-						player->bullets[bullet_index--] = player->bullets[--player->active_bullets];
+					for (int opponent_index = 0; opponent_index < NUM_PLAYERS; ++opponent_index) {
+						if (opponent_index == player_index) continue;
 
-						// If bullet overlaps opponent player, subtract health and remove bullet from pool
+						Player *opponent = game_state->players + opponent_index;
+						float opponent_radius = calculate_player_radius(opponent);
+						bool bullet_overlaps_opponent = CheckCollisionCircles(bullet_position, bullet_radius, opponent->position, opponent_radius);
+
 						if (bullet_overlaps_opponent) {
+							destroy_bullet = true;
+							// If bullet overlaps opponent player, subtract health and (defer) remove bullet from pool
+
 							--opponent->health;
 
 							Vector2 diff = Vector2Subtract(bullet_position, opponent->position);
@@ -1113,6 +1144,10 @@ int main(void)
 								PlaySound(game_state->sound_win);
 							}
 						}
+					}
+
+					if (destroy_bullet) {
+						player->bullets[bullet_index--] = player->bullets[--player->active_bullets];
 					}
 				}
 			}
@@ -1346,6 +1381,7 @@ int main(void)
 		for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
 
 			Player *player = game_state->players + player_index;
+
 			Player_Parameters *parameters = &player->params;
 
 			float player_radius = calculate_player_radius(player);
