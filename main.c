@@ -99,7 +99,7 @@ typedef struct Player_Parameters {
 } Player_Parameters;
 
 static const Player_Parameters default_player_params = {
-	.starting_health = 30,
+	.starting_health = 1,
 	.minimum_radius = 32.0f,
 	.acceleration_force = 1100.0f,
 	.friction = 0.94f,
@@ -183,6 +183,8 @@ typedef struct Game_State {
 
 	Sound sound_win;
 	int triumphant_player;
+	int num_dead_players;
+	
 	float title_alpha;
 	float time_scale;
 	bool game_in_progress;
@@ -233,11 +235,8 @@ float random_01(uint64_t *random_state) {
 	return result;
 }
 
-void spawn_bullet_ring(Player *player, uint64_t *random_state) {
 
-	int count = (int)(player->energy / player->params.bullet_energy_cost_ring);
-	float speed = 50.0f + Vector2LengthSqr(player->velocity)/1565.0f;
-
+void spawn_bullet_ring_ex(Player *player, uint64_t *random_state, int count, float speed, float spin) {
 	if (player->active_bullets + count > MAX_ACTIVE_BULLETS) {
 		count = MAX_ACTIVE_BULLETS - player->active_bullets;
 	}
@@ -257,13 +256,21 @@ void spawn_bullet_ring(Player *player, uint64_t *random_state) {
 		bullet->position = player->position;
 		bullet->velocity = Vector2Scale((Vector2){cosf(angle), sinf(angle)}, speed);
 		bullet->time = 0;
-		bullet->spin = 0.3f*player->angular_velocity;
+		bullet->spin = spin;
 		angle += angle_quantum;
 	}
 
 	player->active_bullets += count;
 
 	PlaySound(player->params.sound_pop);
+}
+
+void spawn_bullet_ring(Player *player, uint64_t *random_state) {
+
+	int count = (int)(player->energy / player->params.bullet_energy_cost_ring);
+	float speed = 50.0f + Vector2LengthSqr(player->velocity)/1565.0f;
+	float spin = 0.3f*player->angular_velocity;
+	spawn_bullet_ring_ex(player, random_state, count, speed, spin);
 }
 
 void spawn_bullet_fan(Player *player, int count, float speed, float angle_span) {
@@ -333,6 +340,7 @@ void reset_game(Game_State *game_state, View view) {
 
 	game_state->show_menu = false;
 	game_state->triumphant_player = -1;
+	game_state->num_dead_players = 0;
 	game_state->title_alpha = 1.0f;
 	game_state->active_rings = 0;
 	game_state->game_play_time = 0.0f;
@@ -800,6 +808,7 @@ int main(void)
 			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
 
 				Player *player = game_state->players + player_index;
+				if (player->health <= 0) continue;
 
 				float radius = calculate_player_radius(player);
 
@@ -842,6 +851,8 @@ int main(void)
 			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
 
 				Player *player = &game_state->players[player_index];
+				if (player->health <= 0) continue;
+
 
 				Virtual_Input_Device_State input = player->params.input_device->state;
 				Vector2 control = input.direction;
@@ -930,6 +941,8 @@ int main(void)
 
 						Player *player1 = game_state->players + player_1_index;
 						Player *player2 = game_state->players + player_2_index;
+						if (player1->health <= 0) continue;
+						if (player2->health <= 0) continue;
 
 						Vector2 player1_to_position = Vector2Add(player1->position, Vector2Scale(player1->velocity, dt));
 						Vector2 player2_to_position = Vector2Add(player2->position, Vector2Scale(player2->velocity, dt));
@@ -1006,6 +1019,8 @@ int main(void)
 			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
 
 				Player *player = game_state->players + player_index;
+				if (player->health <= 0) continue;
+
 				float player_radius = calculate_player_radius(player);
 
 				Vector2 target_position = player->position = Vector2Add(
@@ -1086,9 +1101,12 @@ int main(void)
 				if (game_state->title_alpha > 0) {
 					game_state->title_alpha -= Vector2Length(player->velocity)*0.0001f;
 				}
+			}
 
-
-				// Update bullets
+			// TODO(jakob): Pull out bullet updates to own loop, as bullets need to be updated even when originating player is dead 
+			// Update bullets
+			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
+				Player *player = game_state->players + player_index;
 				for (int bullet_index = 0; bullet_index < player->active_bullets; ++bullet_index) {
 
 					Bullet *bullet = &player->bullets[bullet_index];
@@ -1118,6 +1136,8 @@ int main(void)
 						if (opponent_index == player_index) continue;
 
 						Player *opponent = game_state->players + opponent_index;
+						if (opponent->health <= 0) continue;
+
 						float opponent_radius = calculate_player_radius(opponent);
 						bool bullet_overlaps_opponent = CheckCollisionCircles(bullet_position, bullet_radius, opponent->position, opponent_radius);
 
@@ -1144,9 +1164,31 @@ int main(void)
 							opponent->hit_animation_t = 0.0f;
 
 							if (opponent->health <= 0) {
-								game_state->triumphant_player = player_index;
-								game_state->game_in_progress = false;
-								PlaySound(game_state->sound_win);
+
+								float bullet_speed = 8 + (2*(opponent->energy/opponent->params.bullet_energy_cost_ring));
+
+								spawn_bullet_ring_ex(
+									opponent,
+									&random_state,
+									bullet_speed,
+									200.0f + 10.0f*opponent->energy,
+									bullet_speed * 0.025f
+								);
+
+								if (++game_state->num_dead_players == NUM_PLAYERS - 1) {
+
+									int triumphant_player = 0;
+
+									while (triumphant_player < NUM_PLAYERS) {
+										if (game_state->players[triumphant_player].health > 0) break;
+										++triumphant_player;
+									}
+
+									game_state->triumphant_player = triumphant_player;
+									game_state->game_in_progress = false;
+									PlaySound(game_state->sound_win);
+								}
+
 							}
 						}
 					}
@@ -1386,6 +1428,7 @@ int main(void)
 		for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
 
 			Player *player = game_state->players + player_index;
+			if (player->health <= 0) continue;
 
 			Player_Parameters *parameters = &player->params;
 
@@ -1488,8 +1531,9 @@ int main(void)
 
 		for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
 			Player *player = game_state->players + player_index;
-			Player_Parameters *parameters = &player->params;
+			if (player->health <= 0) continue;
 
+			Player_Parameters *parameters = &player->params;
 
 			Vector2 player_screen_position = Vector2Scale(player->position, view.scale);
 
