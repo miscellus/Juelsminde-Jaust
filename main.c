@@ -771,12 +771,23 @@ int main(void)
 
 	Menu gameplay_settings_menu = {0};
 	Menu video_settings_menu = {0};
+	Menu controls_menu = {0};
 
-	settings_menu.item_count = 3;
+	settings_menu.item_count = 4;
 	settings_menu.items = (Menu_Item []){
 		{MENU_ITEM_MENU_BACK, "Back", .u = {0}},
 		{MENU_ITEM_MENU, "Gameplay Settings", .u.menu_ref = &gameplay_settings_menu},
 		{MENU_ITEM_MENU, "Video Settings", .u.menu_ref = &video_settings_menu},
+		{MENU_ITEM_MENU, "Controls", .u.menu_ref = &controls_menu},
+	};
+
+	controls_menu.item_count = 4;
+	controls_menu.items = (Menu_Item []){
+		{MENU_ITEM_MENU_BACK, "Back", .u = {0}},
+		{MENU_ITEM_BOOL, "Use Gamepad for Orange Player", .u.bool_ref = &game_state->players[0].params.input_device->use_gamepad},
+		{MENU_ITEM_BOOL, "Use Gamepad for Blue Player", .u.bool_ref = &game_state->players[1].params.input_device->use_gamepad},
+		{MENU_ITEM_BOOL, "Use Gamepad for Green Player", .u.bool_ref = &game_state->players[2].params.input_device->use_gamepad},
+		{MENU_ITEM_BOOL, "Use Gamepad for Purple Player", .u.bool_ref = &game_state->players[3].params.input_device->use_gamepad},
 	};
 
 	gameplay_settings_menu.item_count = 4;
