@@ -920,71 +920,86 @@ int main(void)
 			}
 
 			// Player collision detection and response
-			{
-				Player *player1 = game_state->players + 0;
-				Player *player2 = game_state->players + 1;
+			//
+			for (int collision_iteration = 0; collision_iteration < 8; ++collision_iteration) {
 
-				Vector2 player1_to_position = Vector2Add(player1->position, Vector2Scale(player1->velocity, dt));
-				Vector2 player2_to_position = Vector2Add(player2->position, Vector2Scale(player2->velocity, dt));
+				float cumulative_collision_overlap = 0;
 
-				float player1_radius = calculate_player_radius(player1);
-				float player2_radius = calculate_player_radius(player2);
+				for (int player_1_index = 0; player_1_index < NUM_PLAYERS; ++player_1_index) {
+					for (int player_2_index = player_1_index + 1; player_2_index < NUM_PLAYERS; ++player_2_index) {
 
-				float radii_sum = player2_radius + player1_radius;
+						Player *player1 = game_state->players + player_1_index;
+						Player *player2 = game_state->players + player_2_index;
 
-				Vector2 position_difference = Vector2Subtract(player2_to_position, player1_to_position);
-				float distance = Vector2Length(position_difference);
+						Vector2 player1_to_position = Vector2Add(player1->position, Vector2Scale(player1->velocity, dt));
+						Vector2 player2_to_position = Vector2Add(player2->position, Vector2Scale(player2->velocity, dt));
 
-				if (distance <= radii_sum) {
+						float player1_radius = calculate_player_radius(player1);
+						float player2_radius = calculate_player_radius(player2);
+
+						float radii_sum = player2_radius + player1_radius;
+
+						Vector2 position_difference = Vector2Subtract(player2_to_position, player1_to_position);
+						float distance = Vector2Length(position_difference);
+
+						if (distance <= radii_sum) {
 
 
-					// Static collision
-					float half_overlap = 0.5f*(distance - radii_sum);
+							// Static collision
+							float half_overlap = 0.5f*(distance - radii_sum);
 
+							float inv_distance = 1.0f/distance;
+							
+							cumulative_collision_overlap += 2.0f*half_overlap*inv_distance;
 
-					float inv_distance = 1.0f/distance;
+							player1->position = player1_to_position = Vector2Add(player1_to_position, Vector2Scale(position_difference, half_overlap*inv_distance));
+							player2->position = player2_to_position = Vector2Add(player2_to_position, Vector2Scale(position_difference, -half_overlap*inv_distance));
 
-					player1->position = player1_to_position = Vector2Add(player1_to_position, Vector2Scale(position_difference, half_overlap*inv_distance));
-					player2->position = player2_to_position = Vector2Add(player2_to_position, Vector2Scale(position_difference, -half_overlap*inv_distance));
+							// Dynamic collision
+							// assert(fabs(radii_sum - Vector2Length(position_difference)) < 0.0001f);
+							distance = radii_sum;//Vector2Length(position_difference);; // After the move, the distance is exactly equal to the sum of radii
+							inv_distance = 1.0f/distance; // After the move, the distance is exactly equal to the sum of radii
+							position_difference = Vector2Subtract(player2_to_position, player1_to_position);
 
-					// Dynamic collision
-					// assert(fabs(radii_sum - Vector2Length(position_difference)) < 0.0001f);
-					distance = radii_sum;//Vector2Length(position_difference);; // After the move, the distance is exactly equal to the sum of radii
-					inv_distance = 1.0f/distance; // After the move, the distance is exactly equal to the sum of radii
-					position_difference = Vector2Subtract(player2_to_position, player1_to_position);
+							Vector2 normal = Vector2Scale(position_difference, inv_distance);
+							Vector2 tangent = (Vector2){normal.y, -normal.x};
 
-					Vector2 normal = Vector2Scale(position_difference, inv_distance);
-					Vector2 tangent = (Vector2){normal.y, -normal.x};
+							float normal_response_1 = Vector2DotProduct(normal, player1->velocity);
+							float normal_response_2 = Vector2DotProduct(normal, player2->velocity);
 
-					float normal_response_1 = Vector2DotProduct(normal, player1->velocity);
-					float normal_response_2 = Vector2DotProduct(normal, player2->velocity);
+							float tangental_response_1 = Vector2DotProduct(tangent, player1->velocity);
+							float tangental_response_2 = Vector2DotProduct(tangent, player2->velocity);
 
-					float tangental_response_1 = Vector2DotProduct(tangent, player1->velocity);
-					float tangental_response_2 = Vector2DotProduct(tangent, player2->velocity);
+							float mass_1 = calculate_player_radius(player1);
+							float mass_2 = calculate_player_radius(player2);
 
-					float mass_1 = calculate_player_radius(player1);
-					float mass_2 = calculate_player_radius(player2);
+							float momentum_1 = (normal_response_1 * (mass_1 - mass_2) + 2.0f * mass_2 * normal_response_2) / (mass_1 + mass_2);
+							float momentum_2 = (normal_response_2 * (mass_2 - mass_1) + 2.0f * mass_1 * normal_response_1) / (mass_1 + mass_2);
 
-					float momentum_1 = (normal_response_1 * (mass_1 - mass_2) + 2.0f * mass_2 * normal_response_2) / (mass_1 + mass_2);
-					float momentum_2 = (normal_response_2 * (mass_2 - mass_1) + 2.0f * mass_1 * normal_response_1) / (mass_1 + mass_2);
+							player1->velocity = Vector2Add(
+								Vector2Scale(tangent, tangental_response_1),
+								Vector2Scale(normal, momentum_1)
+							);
 
-					player1->velocity = Vector2Add(
-						Vector2Scale(tangent, tangental_response_1),
-						Vector2Scale(normal, momentum_1)
-					);
+							player2->velocity = Vector2Add(
+								Vector2Scale(tangent, tangental_response_2),
+								Vector2Scale(normal, momentum_2)
+							);
 
-					player2->velocity = Vector2Add(
-						Vector2Scale(tangent, tangental_response_2),
-						Vector2Scale(normal, momentum_2)
-					);
+							if (hit_is_hard_enough(normal_response_1)) {
+								spawn_bullet_ring(player1, &random_state);
+							}
 
-					if (hit_is_hard_enough(normal_response_1)) {
-						spawn_bullet_ring(player1, &random_state);
+							if (hit_is_hard_enough(normal_response_2)) {
+								spawn_bullet_ring(player2, &random_state);
+							}
+						}
 					}
+				}
 
-					if (hit_is_hard_enough(normal_response_2)) {
-						spawn_bullet_ring(player2, &random_state);
-					}
+				if (cumulative_collision_overlap < 0.0001f) {
+					// printf("cumulative_collision_overlap: %.4f\n", cumulative_collision_overlap);
+					break;
 				}
 			}
 
@@ -1514,7 +1529,7 @@ int main(void)
 
 		if (triumphant_player >= 0 || game_state->show_menu) {
 
-			assert(triumphant_player < 2);
+			assert(triumphant_player < NUM_PLAYERS);
 
 			Color screen_overlay_color = (Color){255.0f, 255.0f, 255.0f, 192.0f};
 
@@ -1532,6 +1547,8 @@ int main(void)
 				const char *win_text = (const char *[]){
 					"Orange Player Wins",
 					"Blue Player Wins",
+					"Green Player Wins",
+					"Purple Player Wins",
 				}[triumphant_player];
 
 				const char *reset_button_text = "Press [Enter] to Reset";
