@@ -35,6 +35,7 @@ typedef struct Bullet {
 	Vector2 position;
 	Vector2 velocity;
 	float time;
+	float spin;
 } Bullet;
 
 typedef struct Virtual_Input_Button {
@@ -113,6 +114,7 @@ static const Player_Parameters default_player_params = {
 typedef struct Player {
 	Vector2 position;
 	Vector2 velocity;
+	float angular_velocity;
 	float shoot_angle;
 	int health;
 	float energy;
@@ -241,6 +243,7 @@ void spawn_bullet_ring(Player *player, uint64_t *random_state) {
 		bullet->position = player->position;
 		bullet->velocity = Vector2Scale((Vector2){cosf(angle), sinf(angle)}, speed);
 		bullet->time = 0;
+		bullet->spin = 0.3f*player->angular_velocity;
 		angle += angle_quantum;
 	}
 
@@ -273,6 +276,7 @@ void spawn_bullet_fan(Player *player, int count, float speed, float angle_span) 
 		bullet->velocity = Vector2Scale((Vector2){cosf(angle), sinf(angle)}, speed);
 		bullet->velocity = Vector2Add(bullet->velocity, quater_player_velocity);
 		bullet->time = 0;
+		bullet->spin = 0.3f*player->angular_velocity;
 		angle += angle_quantum;
 	}
 
@@ -403,6 +407,24 @@ float lerp_angle(float a, float b, float t) {
     }
 
     return result;
+}
+
+float shortest_angle_difference(float a, float b) {
+	// NOTE(jakob & patrick): This assumes normalized angles between 0 and 2*PI
+	// assert(a >= 0.0f);
+	// assert(b >= 0.0f);
+	// assert(a <= 2*PI + 0.00001f);
+	// assert(b <= 2*PI + 0.00001f);
+
+	float angle_difference = b - a;
+
+	if (angle_difference > PI) {
+		angle_difference -= 2*PI;
+	} else if (angle_difference < -PI) {
+		angle_difference += 2*PI;
+	}
+
+	return angle_difference;
 }
 
 static const Virtual_Input_Key_Map global_key_maps[] = {
@@ -750,19 +772,19 @@ int main(void)
 				}
 				else {
 
-					// NOTE(jakob): atan2 lookup table
-					float control_angle = ((float[3][3]){
-						{-2.356194490192345f, 3.141592653589793f, 2.356194490192345f},
-						{-1.5707963267948966f, 0.0f, 1.5707963267948966f},
-						{-0.7853981633974483f, 0.0f, 0.7853981633974483f},
-					})[(int)control.x+1][(int)control.y+1];
+					float control_angle = atan2f(control.y, control.x);
 
-					if (control.x != 0.0f && control.y != 0.0f) {
-						// Normalize player movement controls
-						control = Vector2Scale(control, INV_SQRT_TWO);
-					}
+					// Normalize player movement controls
+					float control_inv_length = 1.0f/sqrtf(control.x*control.x + control.y*control.y);
+					control.x *= control_inv_length;
+					control.y *= control_inv_length;
 
+					float old_angle = player->shoot_angle;
 					player->shoot_angle = lerp_angle(player->shoot_angle, control_angle, 3.0f * dt);
+
+					float angular_pulse = 10.0f*shortest_angle_difference(old_angle, player->shoot_angle);
+
+					player->angular_velocity = 0.5f*player->angular_velocity + 0.5f*angular_pulse;
 				}
 
 				Vector2 acceleration = Vector2Scale(control, player->params.acceleration_force * dt);
@@ -988,6 +1010,9 @@ int main(void)
 					Vector2 bullet_position = bullet->position;
 
 					bullet->position = Vector2Add(bullet_position, Vector2Scale(bullet->velocity, dt));
+
+					// This enables spin moves
+					bullet->velocity = Vector2Rotate(bullet->velocity, dt*bullet->spin);
 
 					float bullet_radius = player->params.bullet_radius;
 					bool bullet_overlaps_opponent = CheckCollisionCircles(bullet_position, bullet_radius, opponent->position, opponent_radius);
