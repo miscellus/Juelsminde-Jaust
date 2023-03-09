@@ -1,13 +1,11 @@
 #include <assert.h>
 #include <string.h>
 #include <stdlib.h>
-#include <raymath.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <time.h>
 
 #include <raylib.h>
-#include <GLFW/glfw3.h>
 
 #ifdef __APPLE__
 #include "CoreFoundation/CoreFoundation.h"
@@ -627,10 +625,6 @@ int main(void)
 	InitWindow(1024, 768, title);
 	HideCursor();
 	ToggleFullscreen();
-
-	// Get available video modes from GLFW
- 	int video_mode_count;
-    const GLFWvidmode* video_modes = glfwGetVideoModes(glfwGetPrimaryMonitor(), &video_mode_count);
 
     SetTargetFPS(60);
 
