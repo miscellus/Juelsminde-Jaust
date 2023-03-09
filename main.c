@@ -78,6 +78,13 @@ typedef struct Virtual_Input_Device {
 	Virtual_Input_Device_State state;
 } Virtual_Input_Device;
 
+typedef struct Virtual_Input {
+#define MAX_ACTIVE_INPUT_DEVICES 4
+#define NUM_INPUT_DEVICES 3 // @hardcode
+	Virtual_Input_Device devices[MAX_ACTIVE_INPUT_DEVICES];
+	Virtual_Input_Device_State input_common;
+} Virtual_Input;
+
 typedef struct Player_Parameters {
 	Virtual_Input_Device *input_device;
 
@@ -100,7 +107,7 @@ typedef struct Player_Parameters {
 } Player_Parameters;
 
 static const Player_Parameters default_player_params = {
-	.starting_health = 30,
+	.starting_health = 1,
 	.minimum_radius = 32.0f,
 	.acceleration_force = 1100.0f,
 	.friction = 0.94f,
@@ -180,9 +187,7 @@ typedef struct Game_State {
 	bool running;
 	bool show_menu;
 
-#define MAX_ACTIVE_INPUT_DEVICES 4
-#define NUM_INPUT_DEVICES 3 // @hardcode
-	Virtual_Input_Device input_devices[MAX_ACTIVE_INPUT_DEVICES];
+	Virtual_Input input;
 
 	Sound sound_win;
 	int triumphant_player;
@@ -344,6 +349,10 @@ bool position_outside_playzone(Vector2 position, View view) {
 void draw_text_shadowed(Font font, const char *text, Vector2 position, float font_size, float font_spacing, Color front_color, Color background_color) {
 	DrawTextEx(font, text, Vector2Add(position, (Vector2){3, 3}), font_size, font_spacing, background_color);
 	DrawTextEx(font, text, position, font_size, font_spacing, front_color);
+}
+
+static bool is_game_over(Game_State *game_state) {
+	return game_state->num_dead_players >= NUM_PLAYERS - 1;
 }
 
 void reset_game(Game_State *game_state, View view) {
@@ -533,9 +542,9 @@ static const Virtual_Input_Key_Map global_key_maps[] = {
 	},
 };
 
-static void virtual_input_init(Virtual_Input_Device *input_devices) {
+static void virtual_input_init(Virtual_Input *input) {
 	for (int device_index = 0; device_index < NUM_INPUT_DEVICES; ++device_index) {
-		Virtual_Input_Device *dev = &input_devices[device_index];
+		Virtual_Input_Device *dev = &input->devices[device_index];
 
 		dev->gamepad.available = false;
 		dev->use_gamepad = true; // @hardcode TODO(jakob): Make this configurable from menu
@@ -543,14 +552,19 @@ static void virtual_input_init(Virtual_Input_Device *input_devices) {
 		dev->keys = global_key_maps[device_index];
 		dev->state = (Virtual_Input_Device_State){0};
 	}
+
+	input->input_common = (Virtual_Input_Device_State){0};
 }
 
 
-static void virtual_input_update(Virtual_Input_Device *input_devices) {
+static void virtual_input_update(Virtual_Input *input) {
+
+	Virtual_Input_Device_State *common = &input->input_common;
+	*common = (Virtual_Input_Device_State){0};
+
 	for (int device_index = 0; device_index < NUM_INPUT_DEVICES; ++device_index) {
 
-		Virtual_Input_Device *dev = &input_devices[device_index];
-
+		Virtual_Input_Device *dev = &input->devices[device_index];
 
 		if (dev->use_gamepad) {
 			dev->gamepad.available = IsGamepadAvailable(device_index);
@@ -568,6 +582,17 @@ static void virtual_input_update(Virtual_Input_Device *input_devices) {
 			dev->state.buttons[VIRTUAL_BUTTON_ACTION].is_down = IsGamepadButtonDown(gamepad_number, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
 			dev->state.buttons[VIRTUAL_BUTTON_ACTION].is_pressed = IsGamepadButtonPressed(gamepad_number, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
 			dev->state.buttons[VIRTUAL_BUTTON_ACTION].is_released = IsGamepadButtonReleased(gamepad_number, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
+
+			dev->state.buttons[VIRTUAL_BUTTON_MENU].is_down = IsGamepadButtonDown(gamepad_number, GAMEPAD_BUTTON_MIDDLE_RIGHT);
+			dev->state.buttons[VIRTUAL_BUTTON_MENU].is_pressed = IsGamepadButtonPressed(gamepad_number, GAMEPAD_BUTTON_MIDDLE_RIGHT);
+			dev->state.buttons[VIRTUAL_BUTTON_MENU].is_released = IsGamepadButtonReleased(gamepad_number, GAMEPAD_BUTTON_MIDDLE_RIGHT);
+
+			Vector2 direction_keys = (Vector2){0.0f, 0.0f};
+			if (IsGamepadButtonDown(gamepad_number, GAMEPAD_BUTTON_LEFT_FACE_LEFT)) direction_keys.x -= 1.0f;
+			if (IsGamepadButtonDown(gamepad_number, GAMEPAD_BUTTON_LEFT_FACE_RIGHT)) direction_keys.x += 1.0f;
+			if (IsGamepadButtonDown(gamepad_number, GAMEPAD_BUTTON_LEFT_FACE_UP)) direction_keys.y -= 1.0f;
+			if (IsGamepadButtonDown(gamepad_number, GAMEPAD_BUTTON_LEFT_FACE_DOWN)) direction_keys.y += 1.0f;
+			common->direction = Vector2Add(common->direction, direction_keys);	
 		}
 		else {
 			
@@ -587,7 +612,31 @@ static void virtual_input_update(Virtual_Input_Device *input_devices) {
 			dev->state.buttons[VIRTUAL_BUTTON_MENU].is_pressed = IsKeyPressed(dev->keys.key_menu);
 			dev->state.buttons[VIRTUAL_BUTTON_MENU].is_released = IsKeyReleased(dev->keys.key_menu);
 		}
+
+		common->direction = Vector2Add(common->direction, dev->state.direction);
+		common->buttons[VIRTUAL_BUTTON_ACTION].is_down |= dev->state.buttons[VIRTUAL_BUTTON_ACTION].is_down;
+		common->buttons[VIRTUAL_BUTTON_ACTION].is_pressed |= dev->state.buttons[VIRTUAL_BUTTON_ACTION].is_pressed;
+		common->buttons[VIRTUAL_BUTTON_ACTION].is_released |= dev->state.buttons[VIRTUAL_BUTTON_ACTION].is_released;
+		common->buttons[VIRTUAL_BUTTON_MENU].is_down |= dev->state.buttons[VIRTUAL_BUTTON_MENU].is_down;
+		common->buttons[VIRTUAL_BUTTON_MENU].is_pressed |= dev->state.buttons[VIRTUAL_BUTTON_MENU].is_pressed;
+		common->buttons[VIRTUAL_BUTTON_MENU].is_released |= dev->state.buttons[VIRTUAL_BUTTON_MENU].is_released;
 	}
+
+	Vector2 direction_keys = (Vector2){0.0f, 0.0f};
+	if (IsKeyDown(KEY_LEFT)) direction_keys.x -= 1.0f;
+	if (IsKeyDown(KEY_RIGHT)) direction_keys.x += 1.0f;
+	if (IsKeyDown(KEY_UP)) direction_keys.y -= 1.0f;
+	if (IsKeyDown(KEY_DOWN)) direction_keys.y += 1.0f;
+	common->direction = Vector2Add(common->direction, direction_keys);
+
+	common->direction = Vector2NormalizeOrZero(input->input_common.direction);
+
+	common->buttons[VIRTUAL_BUTTON_ACTION].is_down |= IsKeyDown(KEY_ENTER);
+	common->buttons[VIRTUAL_BUTTON_ACTION].is_pressed |= IsKeyPressed(KEY_ENTER);
+	common->buttons[VIRTUAL_BUTTON_ACTION].is_released |= IsKeyReleased(KEY_ENTER);
+	common->buttons[VIRTUAL_BUTTON_MENU].is_down |= IsKeyDown(KEY_ESCAPE);
+	common->buttons[VIRTUAL_BUTTON_MENU].is_pressed |= IsKeyPressed(KEY_ESCAPE);
+	common->buttons[VIRTUAL_BUTTON_MENU].is_released |= IsKeyReleased(KEY_ESCAPE);
 }
 
 static void read_file_into_c_string(const char *filepath, char **contents_out, size_t *file_size_out) {
@@ -666,9 +715,9 @@ int main(void)
 	Game_State *game_state = calloc(1, sizeof(*game_state));
 	assert(game_state);
 
-	Virtual_Input_Device *input_devices = game_state->input_devices;
+	Virtual_Input *input = &game_state->input;
 
-	virtual_input_init(input_devices);
+	virtual_input_init(input);
 
 	// Init player parameters
 	{
@@ -677,7 +726,7 @@ int main(void)
 		params = &game_state->players[0].params;
 
 		*params = default_player_params;
-		params->input_device = &input_devices[0];
+		params->input_device = &input->devices[0];
 		params->key_text = "Arrow Keys + Right CTRL";
 		params->sound_pop = LoadSound("resources/player_1_pop.wav");
 		params->sound_hit = LoadSound("resources/player_1_hit.wav");
@@ -686,7 +735,7 @@ int main(void)
 		params = &game_state->players[1].params;
 
 		*params = default_player_params;
-		params->input_device = &input_devices[1];
+		params->input_device = &input->devices[1];
 		params->key_text = "W,A,S,D + Left CTRL";
 		params->sound_pop = LoadSound("resources/player_2_pop.wav");
 		params->sound_hit = LoadSound("resources/player_2_hit.wav");
@@ -695,7 +744,7 @@ int main(void)
 		params = &game_state->players[2].params;
 
 		*params = default_player_params;
-		params->input_device = &input_devices[2];
+		params->input_device = &input->devices[2];
 		params->key_text = "I,J,K,L + U";
 		params->sound_pop = LoadSound("resources/player_2_pop.wav");
 		params->sound_hit = LoadSound("resources/player_2_hit.wav");
@@ -792,7 +841,7 @@ int main(void)
 			view = get_updated_view();
 		}
 
-		virtual_input_update(input_devices);
+		virtual_input_update(input);
 
 		// Update
 		//-----------------------------------------------------
@@ -803,7 +852,11 @@ int main(void)
 			ToggleFullscreen();  // modifies window size when scaling!
 		}
 
-		if (IsKeyPressed(KEY_ESCAPE)) {
+		if (is_game_over(game_state) && !game_state->show_menu && input->input_common.buttons[VIRTUAL_BUTTON_MENU].is_pressed) {
+			reset_game(game_state, view);
+			input->input_common.buttons[VIRTUAL_BUTTON_MENU].is_pressed = false;
+		}
+		else if (input->input_common.buttons[VIRTUAL_BUTTON_MENU].is_pressed) {
 			if (game_state->show_menu) {
 				Menu *parent = menu->parent;
 				if (parent) {
@@ -854,12 +907,6 @@ int main(void)
 					}
 
 				}
-			}
-		}
-
-		if (!game_state->show_menu) {
-			if (!toggle_fullscreen && IsKeyPressed(KEY_ENTER)) {
-				reset_game(game_state, view);
 			}
 		}
 
@@ -1233,30 +1280,30 @@ int main(void)
 		}
 		else if (game_state->show_menu && !toggle_fullscreen) {
 
-			int item_change_y = 0;
-			int item_change_x = 0;
-			int item_enter = IsKeyPressed(KEY_ENTER);
+			int item_change_y = (int)input->input_common.direction.y;
+			int item_change_x = (int)input->input_common.direction.x;
+			int item_enter = (int)input->input_common.buttons[VIRTUAL_BUTTON_ACTION].is_down;
 
-			if (IsKeyDown(KEY_UP)) {
-				item_change_y = -1;
-			}
+			// if (IsKeyDown(KEY_UP)) {
+			// 	item_change_y = -1;
+			// }
 
-			if (IsKeyDown(KEY_DOWN)) {
-				++item_change_y;
-			}
+			// if (IsKeyDown(KEY_DOWN)) {
+			// 	++item_change_y;
+			// }
 
-			if (IsKeyDown(KEY_LEFT)) {
-				item_change_x = -1;
-			}
+			// if (IsKeyDown(KEY_LEFT)) {
+			// 	item_change_x = -1;
+			// }
 
-			if (IsKeyDown(KEY_RIGHT)) {
-				++item_change_x;
-			}
+			// if (IsKeyDown(KEY_RIGHT)) {
+			// 	++item_change_x;
+			// }
 
 
 			double current_time = GetTime();
 
-			if (!item_change_y && !item_change_x) {
+			if (!item_change_y && !item_change_x && !item_enter) {
 				menu_item_cooldown = 0.0;
 			}
 			else {
@@ -1270,6 +1317,7 @@ int main(void)
 				else {
 					item_change_y = 0;
 					item_change_x = 0;
+					item_enter = 0;
 				}
 			}
 
