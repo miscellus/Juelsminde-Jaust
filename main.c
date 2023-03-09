@@ -90,6 +90,7 @@ typedef struct Player_Parameters {
 	float minimum_radius;
 	float acceleration_force;
 	float friction;
+	float comback_base_factor;
 
 	float bullet_energy_cost_ring;
 	float bullet_energy_cost_fan;
@@ -99,7 +100,7 @@ typedef struct Player_Parameters {
 } Player_Parameters;
 
 static const Player_Parameters default_player_params = {
-	.starting_health = 1,
+	.starting_health = 30,
 	.minimum_radius = 32.0f,
 	.acceleration_force = 1100.0f,
 	.friction = 0.94f,
@@ -109,6 +110,8 @@ static const Player_Parameters default_player_params = {
 	.bullet_radius = 15.0f,
 	.bullet_time_end_fade = 7.0f,
 	.bullet_time_begin_fade = (7.0f-0.4f),
+
+	.comback_base_factor = 1.0f, // NOTE(jakob & patrick): energy_gained = xxxx + comback_base_factor*(1.0f - ((float)health/(float)starting_health))
 };
 
 typedef struct Player {
@@ -187,7 +190,7 @@ typedef struct Game_State {
 	
 	float title_alpha;
 	float time_scale;
-	bool game_in_progress;
+	bool game_in_progress; // TODO(jakob): Do we need this?
 	float game_play_time;
 #define MAX_ACTIVE_PLAYERS 4
 #define NUM_PLAYERS 3
@@ -203,6 +206,12 @@ typedef struct Game_State {
 
 float calculate_player_radius(Player *player) {
 	return player->params.minimum_radius + player->energy*1.2f;
+}
+
+float calculate_player_comback_factor(Player *player) {
+	Player_Parameters *parameters = &player->params;
+	float result = parameters->comback_base_factor*(1.0f - ((float)player->health / (float)parameters->starting_health));
+	return result;
 }
 
 
@@ -267,7 +276,8 @@ void spawn_bullet_ring_ex(Player *player, uint64_t *random_state, int count, flo
 
 void spawn_bullet_ring(Player *player, uint64_t *random_state) {
 
-	int count = (int)(player->energy / player->params.bullet_energy_cost_ring);
+	float comback_factor = calculate_player_comback_factor(player);
+	int count = (int)((player->energy * (0.5f + 0.5f*comback_factor)) / player->params.bullet_energy_cost_ring);
 	float speed = 50.0f + Vector2LengthSqr(player->velocity)/1565.0f;
 	float spin = 0.3f*player->angular_velocity;
 	spawn_bullet_ring_ex(player, random_state, count, speed, spin);
@@ -340,6 +350,7 @@ void reset_game(Game_State *game_state, View view) {
 
 	game_state->show_menu = false;
 	game_state->triumphant_player = -1;
+	game_state->time_scale = 1.0f;
 	game_state->num_dead_players = 0;
 	game_state->title_alpha = 1.0f;
 	game_state->active_rings = 0;
@@ -843,7 +854,7 @@ int main(void)
 			}
 		}
 
-		if (game_state->game_in_progress && !game_state->show_menu && IsWindowFocused()) {
+		if (!game_state->show_menu && IsWindowFocused()) {
 			game_state->game_play_time += dt;
 
 
@@ -899,7 +910,8 @@ int main(void)
 						player->shoot_time_out = game_state->game_play_time + shoot_cooldown_seconds;
 
 						float t = player->shoot_charge_t;
-						float speed = 50.0f + 650.0f*player->shoot_charge_t;
+						float comback_factor = calculate_player_comback_factor(player);
+						float speed = 50.0f + (400.0f + comback_factor*650.0f)*player->shoot_charge_t;
 						float angle_span;
 						{
 							float narrow_angle_span = 2.0*PI / 60.0f;
@@ -917,7 +929,7 @@ int main(void)
 							recoil_factor = 0;
 						}
 
-						int count = player->energy / player->params.bullet_energy_cost_fan;
+						int count = (player->energy * (0.25f + 0.75f*comback_factor)) / player->params.bullet_energy_cost_fan;
 
 						spawn_bullet_fan(player, count, speed, angle_span);
 
@@ -1092,7 +1104,8 @@ int main(void)
 
 				float speed = Vector2Length(player->velocity);
 
-				player->energy += speed * dt / (player->energy*2.0f + 1.0f);
+				float comback_energy = calculate_player_comback_factor(player);
+				player->energy += dt * (speed * (1 + comback_energy)) / (player->energy*2.0f + 1.0f);
 
 				if (player->hit_animation_t < 1.0f) {
 					player->hit_animation_t += dt*4.0f;
@@ -1103,7 +1116,6 @@ int main(void)
 				}
 			}
 
-			// TODO(jakob): Pull out bullet updates to own loop, as bullets need to be updated even when originating player is dead 
 			// Update bullets
 			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
 				Player *player = game_state->players + player_index;
@@ -1151,7 +1163,7 @@ int main(void)
 
 							diff = Vector2NormalizeOrZero(diff);
 
-							float bullet_mass = 0.25f;
+							float bullet_mass = 0.125f;
 							float bullet_speed = Vector2Length(bullet->velocity);
 
 							opponent->velocity = Vector2Subtract(opponent->velocity, Vector2Scale(diff, bullet_mass*bullet_speed));
@@ -1175,6 +1187,7 @@ int main(void)
 									bullet_speed * 0.025f
 								);
 
+								// Game ends
 								if (++game_state->num_dead_players == NUM_PLAYERS - 1) {
 
 									int triumphant_player = 0;
@@ -1186,6 +1199,7 @@ int main(void)
 
 									game_state->triumphant_player = triumphant_player;
 									game_state->game_in_progress = false;
+									game_state->time_scale = 0.25f;
 									PlaySound(game_state->sound_win);
 								}
 
