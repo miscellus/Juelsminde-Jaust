@@ -85,41 +85,15 @@ typedef struct Virtual_Input {
 	Virtual_Input_Device_State input_common;
 } Virtual_Input;
 
+
 typedef struct Player_Parameters {
 	Virtual_Input_Device *input_device;
-
 	const char *key_text;
 	Sound sound_pop;
 	Sound sound_hit;
 	Color color;
-
-	int starting_health;
-	float minimum_radius;
-	float acceleration_force;
-	float friction;
-	float comeback_base_factor; // TODO(jakob) spell comeback -> comeback
-
-	float bullet_energy_cost_ring;
-	float bullet_energy_cost_fan;
-	float bullet_radius;
-	float bullet_time_end_fade;
-	float bullet_time_begin_fade;
 } Player_Parameters;
 
-static const Player_Parameters default_player_params = {
-	.starting_health = 1,
-	.minimum_radius = 32.0f,
-	.acceleration_force = 1100.0f,
-	.friction = 0.94f,
-
-	.bullet_energy_cost_ring = 2.5f,
-	.bullet_energy_cost_fan = 4.0f,
-	.bullet_radius = 15.0f,
-	.bullet_time_end_fade = 7.0f,
-	.bullet_time_begin_fade = (7.0f-0.4f),
-
-	.comeback_base_factor = 1.0f, // NOTE(jakob & patrick): energy_gained = xxxx + comeback_base_factor*(1.0f - ((float)health/(float)starting_health))
-};
 
 typedef struct Player {
 	Vector2 position;
@@ -151,6 +125,8 @@ enum Menu_Item_Type {
 	MENU_ITEM_BOOL,
 	MENU_ITEM_INT,
 	MENU_ITEM_FLOAT,
+	MENU_ITEM_INT_RANGE,
+	MENU_ITEM_FLOAT_RANGE,
 	MENU_ITEM_MENU,
 	MENU_ITEM_MENU_BACK,
 };
@@ -163,12 +139,20 @@ enum Menu_Action {
 	MENU_ACTION_FULLSCREEN_TOGGLE,
 };
 
+typedef union Value_Range {
+	struct {int *value, min, max;} int_range;
+	struct {float *value, min, max;} float_range;
+} Value_Range;
+
 typedef struct Menu_Item {
 	enum Menu_Item_Type type;
 	const char *text;
+	int minimum;
+	int maximum;
 	union {
 		int *int_ref;
 		float *float_ref;
+		Value_Range range;
 		bool *bool_ref;
 		struct Menu *menu_ref;
 		int int_value;
@@ -183,11 +167,27 @@ typedef struct Menu {
 	unsigned int selected_index;
 } Menu;
 
+typedef struct Game_Parameters {
+	int num_players;
+	int starting_health;
+	float minimum_radius;
+	float acceleration_force;
+	float friction;
+	float comeback_base_factor; // TODO(jakob) spell comeback -> comeback
+
+	float bullet_energy_cost_ring;
+	float bullet_energy_cost_fan;
+	float bullet_radius;
+	float bullet_time_end_fade;
+	float bullet_time_begin_fade;
+} Game_Parameters;
+
 typedef struct Game_State {
 	bool running;
 	bool show_menu;
 
 	Virtual_Input input;
+	Game_Parameters params;
 
 	Sound sound_win;
 	int triumphant_player;
@@ -198,7 +198,7 @@ typedef struct Game_State {
 	bool game_in_progress; // TODO(jakob): Do we need this?
 	float game_play_time;
 #define MAX_ACTIVE_PLAYERS 4
-#define NUM_PLAYERS 3
+// #define NUM_PLAYERS 3
 	Player players[MAX_ACTIVE_PLAYERS];
 #define MAX_ACTIVE_RINGS 128
 	int active_rings;
@@ -208,14 +208,30 @@ typedef struct Game_State {
 	int color_blue;
 } Game_State;
 
+static Game_Parameters game_params_for_new_game = {
+	.num_players = 2,
 
-float calculate_player_radius(Player *player) {
-	return player->params.minimum_radius + player->energy*1.2f;
+	.starting_health = 100,
+	.minimum_radius = 32.0f,
+	.acceleration_force = 1100.0f,
+	.friction = 0.94f,
+
+	.bullet_energy_cost_ring = 2.5f,
+	.bullet_energy_cost_fan = 4.0f,
+	.bullet_radius = 15.0f,
+	.bullet_time_end_fade = 7.0f,
+	.bullet_time_begin_fade = (7.0f-0.4f),
+
+	.comeback_base_factor = 1.0f, // NOTE(jakob & patrick): energy_gained = xxxx + comeback_base_factor*(1.0f - ((float)health/(float)starting_health))
+};
+
+
+float calculate_player_radius(Player *player, Game_Parameters *game_params) {
+	return game_params->minimum_radius + player->energy*1.2f;
 }
 
-float calculate_player_comeback_factor(Player *player) {
-	Player_Parameters *parameters = &player->params;
-	float result = parameters->comeback_base_factor*(1.0f - ((float)player->health / (float)parameters->starting_health));
+float calculate_player_comeback_factor(Player *player, Game_Parameters *game_params) {
+	float result = game_params->comeback_base_factor*(1.0f - ((float)player->health / (float)game_params->starting_health));
 	return result;
 }
 
@@ -250,12 +266,12 @@ float random_01(uint64_t *random_state) {
 }
 
 
-void spawn_bullet_ring_ex(Player *player, uint64_t *random_state, int count, float speed, float spin) {
+void spawn_bullet_ring_ex(Player *player, Game_Parameters *game_params, uint64_t *random_state, int count, float speed, float spin) {
 	if (player->active_bullets + count > MAX_ACTIVE_BULLETS) {
 		count = MAX_ACTIVE_BULLETS - player->active_bullets;
 	}
 
-	player->energy -= count * player->params.bullet_energy_cost_ring;
+	player->energy -= count * game_params->bullet_energy_cost_ring;
 
 	if (player->energy < 0) {
 		player->energy = 0.0f;
@@ -279,22 +295,22 @@ void spawn_bullet_ring_ex(Player *player, uint64_t *random_state, int count, flo
 	PlaySound(player->params.sound_pop);
 }
 
-void spawn_bullet_ring(Player *player, uint64_t *random_state) {
+void spawn_bullet_ring(Player *player, Game_Parameters *game_params, uint64_t *random_state) {
 
-	float comeback_factor = calculate_player_comeback_factor(player);
-	int count = (int)((player->energy * (0.5f + 0.5f*comeback_factor)) / player->params.bullet_energy_cost_ring);
+	float comeback_factor = calculate_player_comeback_factor(player, game_params);
+	int count = (int)((player->energy * (0.5f + 0.5f*comeback_factor)) / game_params->bullet_energy_cost_ring);
 	float speed = 50.0f + Vector2LengthSqr(player->velocity)/1565.0f;
 	float spin = 0.3f*player->angular_velocity;
-	spawn_bullet_ring_ex(player, random_state, count, speed, spin);
+	spawn_bullet_ring_ex(player, game_params, random_state, count, speed, spin);
 }
 
-void spawn_bullet_fan(Player *player, int count, float speed, float angle_span) {
+void spawn_bullet_fan(Player *player, Game_Parameters *game_params, int count, float speed, float angle_span) {
 
 	if (player->active_bullets + count > MAX_ACTIVE_BULLETS) {
 		count = MAX_ACTIVE_BULLETS - player->active_bullets;
 	}
 
-	player->energy -= count * player->params.bullet_energy_cost_fan;
+	player->energy -= count * game_params->bullet_energy_cost_fan;
 
 	if (player->energy < 0) {
 		player->energy = 0.0f;
@@ -352,10 +368,13 @@ void draw_text_shadowed(Font font, const char *text, Vector2 position, float fon
 }
 
 static bool is_game_over(Game_State *game_state) {
-	return game_state->num_dead_players >= NUM_PLAYERS - 1;
+	return game_state->num_dead_players >= game_state->params.num_players - 1;
 }
 
 void reset_game(Game_State *game_state, View view) {
+
+	// Init game parameters
+	game_state->params = game_params_for_new_game;
 
 	game_state->show_menu = false;
 	game_state->triumphant_player = -1;
@@ -366,27 +385,29 @@ void reset_game(Game_State *game_state, View view) {
 	game_state->game_play_time = 0.0f;
 	game_state->game_in_progress = true;
 
+	Game_Parameters *game_params = &game_state->params;
+
 	Player *player;
 
 	player = &game_state->players[0];
 	memset(player, 0, (char *)&player->params - (char *)player);
 	player->position = (Vector2){ view.width * 3.0f/12.0f, view.height / 2.0f };
 	player->shoot_angle = 0.0f;
-	player->health = player->params.starting_health;
+	player->health = game_params->starting_health;
 	player->hit_animation_t = 1.0f;
 
 	player = &game_state->players[1];
 	memset(player, 0, (char *)&player->params - (char *)player);
 	player->position = (Vector2){ view.width * 6.0f/12.0f, view.height / 2.0f };
 	player->shoot_angle = PI/2.0f;
-	player->health = player->params.starting_health;
+	player->health = game_params->starting_health;
 	player->hit_animation_t = 1.0f;
 
 	player = &game_state->players[2];
 	memset(player, 0, (char *)&player->params - (char *)player);
 	player->position = (Vector2){ view.width * 9.0f/12.0f, view.height / 2.0f };
 	player->shoot_angle = PI;
-	player->health = player->params.starting_health;
+	player->health = game_params->starting_health;
 	player->hit_animation_t = 1.0f;
 }
 
@@ -424,12 +445,12 @@ View get_updated_view(void) {
 	return result;
 }
 
-static void calculate_bullet_count_and_angle_span(Player *player, int *count_out, float *angle_span_out) {
+static void calculate_bullet_count_and_angle_span(Player *player, Game_Parameters *game_params, int *count_out, float *angle_span_out) {
 	float narrow_angle_span = 2.0*PI / 60.0f;
 	float wide_angle_span = 2.0*PI / 4.0f;
 	float t = player->shoot_charge_t;
-	float comeback_factor = calculate_player_comeback_factor(player);
-	*count_out = (player->energy * (0.25f + 0.75f*comeback_factor)) / player->params.bullet_energy_cost_fan;
+	float comeback_factor = calculate_player_comeback_factor(player, game_params);
+	*count_out = (player->energy * (0.25f + 0.75f*comeback_factor)) / game_params->bullet_energy_cost_fan;
 	*angle_span_out = Lerp(wide_angle_span, narrow_angle_span, t);
 }
 
@@ -725,7 +746,7 @@ int main(void)
 
 		params = &game_state->players[0].params;
 
-		*params = default_player_params;
+		*params = (Player_Parameters){0};
 		params->input_device = &input->devices[0];
 		params->key_text = "Arrow Keys + Right CTRL";
 		params->sound_pop = LoadSound("resources/player_1_pop.wav");
@@ -734,7 +755,7 @@ int main(void)
 
 		params = &game_state->players[1].params;
 
-		*params = default_player_params;
+		*params = (Player_Parameters){0};
 		params->input_device = &input->devices[1];
 		params->key_text = "W,A,S,D + Left CTRL";
 		params->sound_pop = LoadSound("resources/player_2_pop.wav");
@@ -743,7 +764,7 @@ int main(void)
 
 		params = &game_state->players[2].params;
 
-		*params = default_player_params;
+		*params = (Player_Parameters){0};
 		params->input_device = &input->devices[2];
 		params->key_text = "I,J,K,L + U";
 		params->sound_pop = LoadSound("resources/player_2_pop.wav");
@@ -793,8 +814,16 @@ int main(void)
 	gameplay_settings_menu.item_count = 4;
 	gameplay_settings_menu.items = (Menu_Item []){
 		{MENU_ITEM_MENU_BACK, "Back", .u = {0}},
-		{MENU_ITEM_INT, "Orange Player Health", .u.int_ref = &game_state->players[0].params.starting_health},
-		{MENU_ITEM_INT, "Blue Player Health", .u.int_ref = &game_state->players[1].params.starting_health},
+		{MENU_ITEM_INT_RANGE, "Number of Players", .u.range.int_range = {
+			.value = &game_params_for_new_game.num_players,
+			.min = 2,
+			.max = 4,
+		}},
+		{MENU_ITEM_INT_RANGE, "Starting Player Health", .u.range.int_range = {
+			.value = &game_params_for_new_game.starting_health,
+			.min = 1,
+			.max = 999,
+		}},
 		{MENU_ITEM_FLOAT, "Time Scale", .u.float_ref = &game_state->time_scale},
 	};
 
@@ -809,6 +838,7 @@ int main(void)
 
 	Menu *menu = &main_menu;
 	float menu_item_cooldown = 0.0f;
+	float menu_action_time_start = 0.0f;
 
 	View view = get_updated_view();
 
@@ -842,6 +872,8 @@ int main(void)
 #endif
 
 	game_state->running = true;
+
+	Game_Parameters *game_params = &game_state->params;
 
 	// Main game loop
 	while (game_state->running) {   // Detect window close button or ESC key
@@ -889,12 +921,12 @@ int main(void)
 
 		if (window_resized) {
 
-			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
+			for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
 
 				Player *player = game_state->players + player_index;
 				if (player->health <= 0) continue;
 
-				float radius = calculate_player_radius(player);
+				float radius = calculate_player_radius(player, game_params);
 
 				Rectangle view_rectangle = {0, 0, view.width, view.height};
 
@@ -926,7 +958,7 @@ int main(void)
 
 
 			// Update player input and velocity
-			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
+			for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
 
 				Player *player = &game_state->players[player_index];
 				if (player->health <= 0) continue;
@@ -956,9 +988,9 @@ int main(void)
 
 				}
 
-				Vector2 acceleration = Vector2Scale(control, player->params.acceleration_force * dt);
+				Vector2 acceleration = Vector2Scale(control, game_params->acceleration_force * dt);
 
-				acceleration = Vector2Subtract(acceleration, Vector2Scale(player->velocity, player->params.friction * friction_fraction * dt));
+				acceleration = Vector2Subtract(acceleration, Vector2Scale(player->velocity, game_params->friction * friction_fraction * dt));
 
 				//
 				// Shooting:
@@ -976,8 +1008,7 @@ int main(void)
 						float shoot_cooldown_seconds = 1.0f;
 						player->shoot_time_out = game_state->game_play_time + shoot_cooldown_seconds;
 
-						float t = player->shoot_charge_t;
-						float comeback_factor = calculate_player_comeback_factor(player);
+						float comeback_factor = calculate_player_comeback_factor(player, game_params);
 						float speed = 50.0f + (400.0f + comeback_factor*650.0f)*player->shoot_charge_t;
 
 						Vector2 shoot_vector = (Vector2){cosf(player->shoot_angle), sinf(player->shoot_angle)};
@@ -990,9 +1021,9 @@ int main(void)
 
 						float angle_span;
 						int bullet_count;
-						calculate_bullet_count_and_angle_span(player, &bullet_count, &angle_span);
+						calculate_bullet_count_and_angle_span(player, game_params, &bullet_count, &angle_span);
 
-						spawn_bullet_fan(player, bullet_count, speed, angle_span);
+						spawn_bullet_fan(player, game_params, bullet_count, speed, angle_span);
 
 						acceleration = Vector2Subtract(acceleration, Vector2Scale(shoot_vector, speed*recoil_factor));
 
@@ -1009,8 +1040,8 @@ int main(void)
 
 				float cumulative_collision_overlap = 0;
 
-				for (int player_1_index = 0; player_1_index < NUM_PLAYERS; ++player_1_index) {
-					for (int player_2_index = player_1_index + 1; player_2_index < NUM_PLAYERS; ++player_2_index) {
+				for (int player_1_index = 0; player_1_index < game_params->num_players; ++player_1_index) {
+					for (int player_2_index = player_1_index + 1; player_2_index < game_params->num_players; ++player_2_index) {
 
 						Player *player1 = game_state->players + player_1_index;
 						Player *player2 = game_state->players + player_2_index;
@@ -1020,8 +1051,8 @@ int main(void)
 						Vector2 player1_to_position = Vector2Add(player1->position, Vector2Scale(player1->velocity, dt));
 						Vector2 player2_to_position = Vector2Add(player2->position, Vector2Scale(player2->velocity, dt));
 
-						float player1_radius = calculate_player_radius(player1);
-						float player2_radius = calculate_player_radius(player2);
+						float player1_radius = calculate_player_radius(player1, game_params);
+						float player2_radius = calculate_player_radius(player2, game_params);
 
 						float radii_sum = player2_radius + player1_radius;
 
@@ -1056,8 +1087,8 @@ int main(void)
 							float tangental_response_1 = Vector2DotProduct(tangent, player1->velocity);
 							float tangental_response_2 = Vector2DotProduct(tangent, player2->velocity);
 
-							float mass_1 = calculate_player_radius(player1);
-							float mass_2 = calculate_player_radius(player2);
+							float mass_1 = calculate_player_radius(player1, game_params);
+							float mass_2 = calculate_player_radius(player2, game_params);
 
 							float momentum_1 = (normal_response_1 * (mass_1 - mass_2) + 2.0f * mass_2 * normal_response_2) / (mass_1 + mass_2);
 							float momentum_2 = (normal_response_2 * (mass_2 - mass_1) + 2.0f * mass_1 * normal_response_1) / (mass_1 + mass_2);
@@ -1073,11 +1104,11 @@ int main(void)
 							);
 
 							if (hit_is_hard_enough(normal_response_1)) {
-								spawn_bullet_ring(player1, &random_state);
+								spawn_bullet_ring(player1, game_params, &random_state);
 							}
 
 							if (hit_is_hard_enough(normal_response_2)) {
-								spawn_bullet_ring(player2, &random_state);
+								spawn_bullet_ring(player2, game_params, &random_state);
 							}
 						}
 					}
@@ -1089,12 +1120,12 @@ int main(void)
 				}
 			}
 
-			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
+			for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
 
 				Player *player = game_state->players + player_index;
 				if (player->health <= 0) continue;
 
-				float player_radius = calculate_player_radius(player);
+				float player_radius = calculate_player_radius(player, game_params);
 
 				Vector2 target_position = player->position = Vector2Add(
 					player->position,
@@ -1157,7 +1188,7 @@ int main(void)
 					}
 
 					if (hit_is_hard_enough(cumulative_edge_bounce)) {
-						spawn_bullet_ring(player, &random_state);
+						spawn_bullet_ring(player, game_params, &random_state);
 					}
 				}
 
@@ -1165,7 +1196,7 @@ int main(void)
 
 				float speed = Vector2Length(player->velocity);
 
-				float comeback_energy = calculate_player_comeback_factor(player);
+				float comeback_energy = calculate_player_comeback_factor(player, game_params);
 				player->energy += dt * (speed * (1 + comeback_energy)) / (player->energy*2.0f + 1.0f);
 
 				if (player->hit_animation_t < 1.0f) {
@@ -1178,14 +1209,14 @@ int main(void)
 			}
 
 			// Update bullets
-			for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
+			for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
 				Player *player = game_state->players + player_index;
 				for (int bullet_index = 0; bullet_index < player->active_bullets; ++bullet_index) {
 
 					Bullet *bullet = &player->bullets[bullet_index];
 
 					bullet->time += dt;
-					if (bullet->time > player->params.bullet_time_end_fade) {
+					if (bullet->time > game_params->bullet_time_end_fade) {
 						player->bullets[bullet_index--] = player->bullets[--player->active_bullets];
 						continue;
 					}
@@ -1202,16 +1233,16 @@ int main(void)
 					// This enables spin moves
 					bullet->velocity = Vector2Rotate(bullet->velocity, dt*bullet->spin);
 
-					float bullet_radius = player->params.bullet_radius;
+					float bullet_radius = game_params->bullet_radius;
 					bool destroy_bullet = false;
 
-					for (int opponent_index = 0; opponent_index < NUM_PLAYERS; ++opponent_index) {
+					for (int opponent_index = 0; opponent_index < game_params->num_players; ++opponent_index) {
 						if (opponent_index == player_index) continue;
 
 						Player *opponent = game_state->players + opponent_index;
 						if (opponent->health <= 0) continue;
 
-						float opponent_radius = calculate_player_radius(opponent);
+						float opponent_radius = calculate_player_radius(opponent, game_params);
 						bool bullet_overlaps_opponent = CheckCollisionCircles(bullet_position, bullet_radius, opponent->position, opponent_radius);
 
 						if (bullet_overlaps_opponent) {
@@ -1238,10 +1269,11 @@ int main(void)
 
 							if (opponent->health <= 0) {
 
-								float bullet_speed = 8 + (2*(opponent->energy/opponent->params.bullet_energy_cost_ring));
+								float bullet_speed = 8 + (2*(opponent->energy/game_params->bullet_energy_cost_ring));
 
 								spawn_bullet_ring_ex(
 									opponent,
+									game_params,
 									&random_state,
 									bullet_speed,
 									200.0f + 10.0f*opponent->energy,
@@ -1249,11 +1281,11 @@ int main(void)
 								);
 
 								// Game ends
-								if (++game_state->num_dead_players == NUM_PLAYERS - 1) {
+								if (++game_state->num_dead_players == game_params->num_players - 1) {
 
 									int triumphant_player = 0;
 
-									while (triumphant_player < NUM_PLAYERS) {
+									while (triumphant_player < game_params->num_players) {
 										if (game_state->players[triumphant_player].health > 0) break;
 										++triumphant_player;
 									}
@@ -1343,11 +1375,39 @@ int main(void)
 						}
 					}
 					break;
+				case MENU_ITEM_INT_RANGE:
+					if (item_change_x) {
+						int *value = item->u.range.int_range.value;
+						int min = item->u.range.int_range.min;
+						int max = item->u.range.int_range.max;
+						*value += item_change_x;
+						if (*value < min) {
+							*value = min;
+						}
+						else if (*value > max) {
+							*value = max;
+						}
+					}
+					break;
 				case MENU_ITEM_FLOAT:
 					if (item_change_x) {
 						*item->u.float_ref += item_change_x * 0.1f;
 						if (*item->u.float_ref < 0) {
 							*item->u.float_ref = 0;
+						}
+					}
+					break;
+				case MENU_ITEM_FLOAT_RANGE:
+					if (item_change_x) {
+						float *value = item->u.range.float_range.value;
+						float min = item->u.range.float_range.min;
+						float max = item->u.range.float_range.max;
+						*value += item_change_x * 0.1f;
+						if (*value < min) {
+							*value = min;
+						}
+						else if (*value > max) {
+							*value = max;
 						}
 					}
 					break;
@@ -1448,7 +1508,7 @@ int main(void)
 		//
 		// Draw player's bullets
 		//
-		for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
+		for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
 
 			Player *player = game_state->players + player_index;
 
@@ -1470,15 +1530,15 @@ int main(void)
 
 				float t = 1.0f;
 
-				if (bullet->time >= player->params.bullet_time_begin_fade) {
-					t = (bullet->time - player->params.bullet_time_begin_fade)/(player->params.bullet_time_end_fade - player->params.bullet_time_begin_fade);
+				if (bullet->time >= game_params->bullet_time_begin_fade) {
+					t = (bullet->time - game_params->bullet_time_begin_fade)/(game_params->bullet_time_end_fade - game_params->bullet_time_begin_fade);
 					t *= t*t;
 					t = 1.0f - t;
 				}
 
 				Circle mid_circle = {mid_point, mid_circle_radius};
 
-				float bullet_radius = player->params.bullet_radius;
+				float bullet_radius = game_params->bullet_radius;
 				Circle bullet_circle = {bullet->position, bullet_radius*t};
 
 				Intersection_Points result = intersection_points_from_two_circles(bullet_circle, mid_circle);
@@ -1501,14 +1561,14 @@ int main(void)
 		//
 		// Draw players
 		//
-		for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
+		for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
 
 			Player *player = game_state->players + player_index;
 			if (player->health <= 0) continue;
 
 			Player_Parameters *parameters = &player->params;
 
-			float player_radius = calculate_player_radius(player);
+			float player_radius = calculate_player_radius(player, game_params);
 			float player_radius_screen = player_radius*view.scale;
 			float font_size = player_radius_screen*1.0f;
 			float font_spacing = font_size*FONT_SPACING_FOR_SIZE;
@@ -1523,7 +1583,7 @@ int main(void)
 			if (1) {
 				float angle_span;
 				int spear_count;
-				calculate_bullet_count_and_angle_span(player, &spear_count, &angle_span);
+				calculate_bullet_count_and_angle_span(player, game_params, &spear_count, &angle_span);
 
 				float pointiness = Lerp(15.0f, 50.0f, player->shoot_charge_t);
 				float half_spear_width = PI/16.0f + 0.5f*angle_span;
@@ -1617,7 +1677,7 @@ int main(void)
 			float t2 = ring.t;
 			t1 = 1.0f - t1*t1;
 
-			float ring_radius = 5.0f*player->params.bullet_radius*view.scale;
+			float ring_radius = 5.0f*game_params->bullet_radius*view.scale;
 
 			float outer_radius = t1*ring_radius;
 			float inner_radius = t2*ring_radius;
@@ -1634,7 +1694,7 @@ int main(void)
 		// Draw player controls
 		//
 
-		for (int player_index = 0; player_index < NUM_PLAYERS; ++player_index) {
+		for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
 			Player *player = game_state->players + player_index;
 			if (player->health <= 0) continue;
 
@@ -1649,7 +1709,7 @@ int main(void)
 			if (player_speed <= max_speed_while_drawing_control_text) {
 				if (player->controls_text_timeout < game_state->game_play_time) {
 
-					float player_radius = calculate_player_radius(player)*view.scale;
+					float player_radius = calculate_player_radius(player, game_params)*view.scale;
 					float font_size = player_radius*1.0f;
 					float font_spacing = font_size*FONT_SPACING_FOR_SIZE;
 
@@ -1678,7 +1738,7 @@ int main(void)
 
 		if (triumphant_player >= 0 || game_state->show_menu) {
 
-			assert(triumphant_player < NUM_PLAYERS);
+			assert(triumphant_player < game_params->num_players);
 
 			Color screen_overlay_color = (Color){255.0f, 255.0f, 255.0f, 192.0f};
 
@@ -1757,9 +1817,11 @@ int main(void)
 
 					switch (item->type) {
 						case MENU_ITEM_INT:
+						case MENU_ITEM_INT_RANGE:
 							snprintf(buffer, sizeof(buffer), "%s: %d", item->text, *item->u.int_ref);
 							break;
 						case MENU_ITEM_FLOAT:
+						case MENU_ITEM_FLOAT_RANGE:
 							snprintf(buffer, sizeof(buffer), "%s: %.2f", item->text, *item->u.float_ref);
 							break;
 						case MENU_ITEM_BOOL:
