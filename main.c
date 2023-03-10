@@ -180,6 +180,11 @@ typedef struct Game_Parameters {
 	float bullet_radius;
 	float bullet_time_end_fade;
 	float bullet_time_begin_fade;
+
+	float slowdowns_per_second;
+	float full_charges_per_second;
+
+	float slow_motion_slowest_factor;
 } Game_Parameters;
 
 typedef struct Game_State {
@@ -197,6 +202,8 @@ typedef struct Game_State {
 	float time_scale;
 	bool game_in_progress; // TODO(jakob): Do we need this?
 	float game_play_time;
+	float slow_motion_t;
+
 #define MAX_ACTIVE_PLAYERS 4
 // #define NUM_PLAYERS 3
 	Player players[MAX_ACTIVE_PLAYERS];
@@ -209,9 +216,9 @@ typedef struct Game_State {
 } Game_State;
 
 static Game_Parameters game_params_for_new_game = {
-	.num_players = 2,
+	.num_players = 4,
 
-	.starting_health = 100,
+	.starting_health = 2,
 	.minimum_radius = 32.0f,
 	.acceleration_force = 1100.0f,
 	.friction = 0.94f,
@@ -222,7 +229,11 @@ static Game_Parameters game_params_for_new_game = {
 	.bullet_time_end_fade = 7.0f,
 	.bullet_time_begin_fade = (7.0f-0.4f),
 
+	.slowdowns_per_second = 1.0f,
+	.full_charges_per_second = 1.5f,
+
 	.comeback_base_factor = 1.0f, // NOTE(jakob & patrick): energy_gained = xxxx + comeback_base_factor*(1.0f - ((float)health/(float)starting_health))
+	.slow_motion_slowest_factor = 0.3f,
 };
 
 
@@ -895,6 +906,7 @@ int main(void)
 	// Main game loop
 	while (game_state->running) {   // Detect window close button or ESC key
 		float dt = game_state->time_scale * GetFrameTime();
+
 		bool window_resized = IsWindowResized();
 
 		if (window_resized) {
@@ -973,6 +985,32 @@ int main(void)
 		if (!game_state->show_menu && IsWindowFocused()) {
 			game_state->game_play_time += dt;
 
+			// Slow motion
+			if (game_state->slow_motion_t < 1.0f) {
+				game_state->slow_motion_t += game_params->slowdowns_per_second*dt;
+			
+				float t = game_state->slow_motion_t;
+				float slow_motion_factor;
+
+				float t1 = 0.05f;
+				float t2 = 0.6f;
+
+				if (t < t1) {
+					t = t/t1;
+					slow_motion_factor = Lerp(1.0f, game_params->slow_motion_slowest_factor, t);
+				}
+				else if (t < t2) {
+					t = (t-t1)/(t2-t1);
+					slow_motion_factor = Lerp(game_params->slow_motion_slowest_factor, 0.6f, t);
+				}
+				else {
+					t = (t-t2)/(1.0f - t2);
+					slow_motion_factor = Lerp(0.6f, 1.0f, t);
+				}
+
+				// Apply slow motion
+				dt *= slow_motion_factor;
+			}
 
 			// Update player input and velocity
 			for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
@@ -1015,7 +1053,8 @@ int main(void)
 				if (player->shoot_time_out < game_state->game_play_time) {
 
 					if (input.buttons[VIRTUAL_BUTTON_ACTION].is_down && player->shoot_charge_t < 1.0f) {
-						float full_charges_per_second = 1.5f;
+						float full_charges_per_second = game_params->full_charges_per_second;
+
 						player->shoot_charge_t += full_charges_per_second * dt;
 						if (player->shoot_charge_t > 1.0f) {
 							player->shoot_charge_t = 1.0f;
@@ -1298,19 +1337,28 @@ int main(void)
 								);
 
 								// Game ends
-								if (++game_state->num_dead_players == game_params->num_players - 1) {
 
-									int triumphant_player = 0;
+								if (game_state->triumphant_player == -1) {
+									++game_state->num_dead_players;
 
-									while (triumphant_player < game_params->num_players) {
-										if (game_state->players[triumphant_player].health > 0) break;
-										++triumphant_player;
+									if (is_game_over(game_state)) {
+
+										int triumphant_player = 0;
+
+										while (triumphant_player < game_params->num_players) {
+											if (game_state->players[triumphant_player].health > 0) break;
+											++triumphant_player;
+										}
+
+										game_state->triumphant_player = triumphant_player;
+										game_state->game_in_progress = false;
+										game_state->time_scale = 0.25f;
+										PlaySound(game_state->sound_win);
 									}
-
-									game_state->triumphant_player = triumphant_player;
-									game_state->game_in_progress = false;
-									game_state->time_scale = 0.25f;
-									PlaySound(game_state->sound_win);
+									else {
+										// Start dramatic slow motion
+										game_state->slow_motion_t = 0.0f;
+									}
 								}
 
 							}
