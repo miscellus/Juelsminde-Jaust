@@ -106,6 +106,7 @@ typedef struct Player {
 	float shoot_time_out;
 	float hit_animation_t;
 	float shoot_charge_t;
+	float death_animation_t;
 #define MAX_ACTIVE_BULLETS 2048
 	int active_bullets;
 	Bullet bullets[MAX_ACTIVE_BULLETS];
@@ -776,7 +777,7 @@ int main(void)
 		params->key_text = "I,J,K,L + U";
 		params->sound_pop = LoadSound("resources/player_2_pop.wav");
 		params->sound_hit = LoadSound("resources/player_2_hit.wav");
-		params->color = (Color){40.0f, 240.0f, 80.0f, 255.0f};
+		params->color = (Color){40.0f, 220.0f, 80.0f, 255.0f};
 
 		params = &game_state->players[3].params;
 
@@ -992,19 +993,24 @@ int main(void)
 				float t = game_state->slow_motion_t;
 				float slow_motion_factor;
 
-				float t1 = 0.05f;
+				float t1 = 0.1f;
 				float t2 = 0.6f;
+				float t3 = 0.9f;
 
 				if (t < t1) {
 					t = t/t1;
-					slow_motion_factor = Lerp(1.0f, game_params->slow_motion_slowest_factor, t);
+					slow_motion_factor = Lerp(1.0f, 0.01f, t);
 				}
 				else if (t < t2) {
 					t = (t-t1)/(t2-t1);
-					slow_motion_factor = Lerp(game_params->slow_motion_slowest_factor, 0.6f, t);
+					slow_motion_factor = Lerp(0.01f, 0.4f, t);
+				}
+				else if (t < t3) {
+					t = (t-t2)/(t3-t2);
+					slow_motion_factor = Lerp(0.4f, 0.6f, t);
 				}
 				else {
-					t = (t-t2)/(1.0f - t2);
+					t = (t-t3)/(1.0f - t3);
 					slow_motion_factor = Lerp(0.6f, 1.0f, t);
 				}
 
@@ -1336,6 +1342,8 @@ int main(void)
 									bullet_speed * 0.025f
 								);
 
+								opponent->death_animation_t = 0.0f;
+
 								// Game ends
 
 								if (game_state->triumphant_player == -1) {
@@ -1568,6 +1576,34 @@ int main(void)
 			text_position.y += 2.0f*text_bounds.y;
 
 			DrawTextEx(default_font, website, text_position, font_size, font_spacing, title_color);
+		}
+
+		//
+		// Draw player death animations
+		//
+		for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
+			Player *player = game_state->players + player_index;
+			if (player->health == 0 && player->death_animation_t < 1.0f) {
+				float t = player->death_animation_t;
+
+				Color ring_color = player->params.color;
+				ring_color.a = 32;
+
+				float t1 = 1.0f - t;
+				float t2 = t;
+				t1 = 1.0f - t1*t1;
+
+				float ring_radius = 0.5f*(view.width + view.height)*view.scale;
+
+				float outer_radius = t1*ring_radius;
+				float inner_radius = t2*ring_radius;
+
+				Vector2 pos = Vector2Scale(player->position, view.scale);
+
+				DrawRing(pos, inner_radius, outer_radius, 0, 360, 60, ring_color);
+
+				player->death_animation_t += dt;
+			}
 		}
 
 		//
@@ -1825,7 +1861,7 @@ int main(void)
 					"Purple Player Wins",
 				}[triumphant_player];
 
-				const char *reset_button_text = "Press [Enter] to Reset";
+				const char *reset_button_text = "Press [Esc] or [Menu] to Reset";
 
 				float win_text_font_size = 100*view.scale;
 				float win_text_font_spacing = win_text_font_size*FONT_SPACING_FOR_SIZE;
