@@ -80,7 +80,7 @@ typedef struct Virtual_Input_Device {
 
 typedef struct Virtual_Input {
 #define MAX_ACTIVE_INPUT_DEVICES 4
-#define NUM_INPUT_DEVICES 3 // @hardcode
+#define NUM_INPUT_DEVICES 4 // @hardcode
 	Virtual_Input_Device devices[MAX_ACTIVE_INPUT_DEVICES];
 	Virtual_Input_Device_State input_common;
 } Virtual_Input;
@@ -387,28 +387,24 @@ void reset_game(Game_State *game_state, View view) {
 
 	Game_Parameters *game_params = &game_state->params;
 
-	Player *player;
+	int column_count = game_params->num_players;
+	float column_width = view.width / (float)column_count;
 
-	player = &game_state->players[0];
-	memset(player, 0, (char *)&player->params - (char *)player);
-	player->position = (Vector2){ view.width * 3.0f/12.0f, view.height / 2.0f };
-	player->shoot_angle = 0.0f;
-	player->health = game_params->starting_health;
-	player->hit_animation_t = 1.0f;
+	for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
+		Player *player = &game_state->players[player_index];
 
-	player = &game_state->players[1];
-	memset(player, 0, (char *)&player->params - (char *)player);
-	player->position = (Vector2){ view.width * 6.0f/12.0f, view.height / 2.0f };
-	player->shoot_angle = PI/2.0f;
-	player->health = game_params->starting_health;
-	player->hit_animation_t = 1.0f;
+		Vector2 screen_center = (Vector2){0.5f*view.width, 0.5f*view.height};
 
-	player = &game_state->players[2];
-	memset(player, 0, (char *)&player->params - (char *)player);
-	player->position = (Vector2){ view.width * 9.0f/12.0f, view.height / 2.0f };
-	player->shoot_angle = PI;
-	player->health = game_params->starting_health;
-	player->hit_animation_t = 1.0f;
+		Vector2 aim_dir = Vector2Subtract(screen_center, player->position);
+		aim_dir = Vector2NormalizeOrZero(aim_dir);
+
+		memset(player, 0, (char *)&player->params - (char *)player);
+		player->position = (Vector2){ column_width*(player_index + 0.5f), view.height / 2.0f };
+		player->shoot_angle = atan2f(aim_dir.y, aim_dir.x);
+		player->health = game_params->starting_health;
+		player->hit_animation_t = 1.0f;
+
+	}
 }
 
 void set_window_to_monitor_dimensions(void) {
@@ -770,6 +766,15 @@ int main(void)
 		params->sound_pop = LoadSound("resources/player_2_pop.wav");
 		params->sound_hit = LoadSound("resources/player_2_hit.wav");
 		params->color = (Color){40.0f, 240.0f, 80.0f, 255.0f};
+
+		params = &game_state->players[3].params;
+
+		*params = (Player_Parameters){0};
+		params->input_device = &input->devices[3];
+		params->key_text = "Num 8,4,5,6 + Num 7";
+		params->sound_pop = LoadSound("resources/player_1_pop.wav");
+		params->sound_hit = LoadSound("resources/player_1_hit.wav");
+		params->color = (Color){180.0f, 50.0f, 220.0f, 255.0f};
 	}
 	game_state->sound_win = LoadSound("resources/win.wav");
 
@@ -802,7 +807,7 @@ int main(void)
 		{MENU_ITEM_MENU, "Controls", .u.menu_ref = &controls_menu},
 	};
 
-	controls_menu.item_count = 4;
+	controls_menu.item_count = 5;
 	controls_menu.items = (Menu_Item []){
 		{MENU_ITEM_MENU_BACK, "Back", .u = {0}},
 		{MENU_ITEM_BOOL, "Use Gamepad for Orange Player", .u.bool_ref = &game_state->players[0].params.input_device->use_gamepad},
@@ -830,9 +835,21 @@ int main(void)
 	video_settings_menu.item_count = 5;
 	video_settings_menu.items = (Menu_Item []){
 		{MENU_ITEM_MENU_BACK, "Back", .u = {0}},
-		{MENU_ITEM_INT, "Background (Red)", .u.int_ref = &game_state->color_red},
-		{MENU_ITEM_INT, "Background (Green)", .u.int_ref = &game_state->color_green},
-		{MENU_ITEM_INT, "Background (Blue)", .u.int_ref = &game_state->color_blue},
+		{MENU_ITEM_INT_RANGE, "Background (Red)", .u.range.int_range = {
+			.value = &game_state->color_red,
+			.min = 0,
+			.max = 255,
+		}},
+		{MENU_ITEM_INT_RANGE, "Background (Green)", .u.range.int_range = {
+			.value = &game_state->color_green,
+			.min = 0,
+			.max = 255,
+		}},
+		{MENU_ITEM_INT_RANGE, "Background (Blue)", .u.range.int_range = {
+			.value = &game_state->color_blue,
+			.min = 0,
+			.max = 255,
+		}},
 		{MENU_ITEM_ACTION, "Full Screen", .action = menu_action_toggle_fullscreen, .u.int_value = MENU_ACTION_FULLSCREEN_TOGGLE},
 	};
 
@@ -1382,10 +1399,10 @@ int main(void)
 						int max = item->u.range.int_range.max;
 						*value += item_change_x;
 						if (*value < min) {
-							*value = min;
+							*value = max;
 						}
 						else if (*value > max) {
-							*value = max;
+							*value = min;
 						}
 					}
 					break;
