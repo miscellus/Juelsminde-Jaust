@@ -575,9 +575,9 @@ static void virtual_input_init(Virtual_Input *input) {
 	for (int device_index = 0; device_index < NUM_INPUT_DEVICES; ++device_index) {
 		Virtual_Input_Device *dev = &input->devices[device_index];
 
-		dev->gamepad.available = false;
-		dev->use_gamepad = true; // @hardcode TODO(jakob): Make this configurable from menu
 		dev->gamepad.gamepad_number = device_index;
+		dev->gamepad.available = IsGamepadAvailable(device_index);
+		dev->use_gamepad = dev->gamepad.available;
 		dev->keys = global_key_maps[device_index];
 		dev->state = (Virtual_Input_Device_State){0};
 	}
