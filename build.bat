@@ -1,6 +1,6 @@
 @echo off
 
-SET GAME_NAME="Juelsminde Jaust"
+SET GAME_NAME="Juelsminde Joust"
 
 SET CFLAGS=-std=c99 -O3 -Wall -Wextra -pedantic -I include
 
