@@ -136,7 +136,7 @@ enum Menu_Action {
 	MENU_ACTION_NEW_GAME,
 	MENU_ACTION_CONTINUE,
 	MENU_ACTION_QUIT,
-
+	MENU_ACTION_CONNECT_TO_HOST,
 	MENU_ACTION_FULLSCREEN_TOGGLE,
 };
 
@@ -148,8 +148,6 @@ typedef union Value_Range {
 typedef struct Menu_Item {
 	enum Menu_Item_Type type;
 	const char *text;
-	int minimum;
-	int maximum;
 	union {
 		int *int_ref;
 		float *float_ref;
@@ -214,6 +212,8 @@ typedef struct Game_State {
 	int color_red;
 	int color_green;
 	int color_blue;
+
+	uint32_t ipv4_host_address;
 } Game_State;
 
 static Game_Parameters game_params_for_new_game = {
@@ -797,12 +797,14 @@ int main(void)
 	game_state->time_scale = 1.0f;
 
 	Menu main_menu = {0};
+	Menu network_game_menu = {0};
 	Menu settings_menu = {0};
 
-	main_menu.item_count = 4;
+	main_menu.item_count = 5;
 	main_menu.items = (Menu_Item []) {
 		{MENU_ITEM_ACTION, "Continue", .u.int_value=MENU_ACTION_CONTINUE},
 		{MENU_ITEM_ACTION, "New Game", .u.int_value=MENU_ACTION_NEW_GAME},
+		{MENU_ITEM_MENU, "New Network Game", .u.menu_ref = &network_game_menu},
 		{MENU_ITEM_MENU, "Settings", .u.menu_ref = &settings_menu},
 		{MENU_ITEM_ACTION, "Quit", .u.int_value=MENU_ACTION_QUIT},
 	};
@@ -810,6 +812,34 @@ int main(void)
 	Menu gameplay_settings_menu = {0};
 	Menu video_settings_menu = {0};
 	Menu controls_menu = {0};
+
+	int ip24_31 = 192, ip16_23 = 168, ip8_15 = 0, ip0_7 = 0;
+
+	network_game_menu.item_count = 6;
+	network_game_menu.items = (Menu_Item []){
+		{MENU_ITEM_MENU_BACK, "Back", .u = {0}},
+		{MENU_ITEM_INT_RANGE, "Host IP[24-31]", .u.range.int_range = {
+			.value = &ip24_31,
+			.min = 0,
+			.max = 255,
+		}},
+		{MENU_ITEM_INT_RANGE, "Host IP[16-23]", .u.range.int_range = {
+			.value = &ip16_23,
+			.min = 0,
+			.max = 255,
+		}},
+		{MENU_ITEM_INT_RANGE, "Host IP[8-15]", .u.range.int_range = {
+			.value = &ip8_15,
+			.min = 0,
+			.max = 255,
+		}},
+		{MENU_ITEM_INT_RANGE, "Host IP[0-7]", .u.range.int_range = {
+			.value = &ip0_7,
+			.min = 0,
+			.max = 255,
+		}},
+		{MENU_ITEM_ACTION, "Connect to Host", .u.int_value=MENU_ACTION_CONNECT_TO_HOST},
+	};
 
 	settings_menu.item_count = 4;
 	settings_menu.items = (Menu_Item []){
@@ -1360,7 +1390,6 @@ int main(void)
 										}
 
 										game_state->triumphant_player = triumphant_player;
-										game_state->game_in_progress = false;
 										game_state->time_scale = 0.25f;
 										PlaySound(game_state->sound_win);
 									}
@@ -1503,10 +1532,27 @@ int main(void)
 							case MENU_ACTION_QUIT:
 								game_state->running = false;
 								break;
+							case MENU_ACTION_CONNECT_TO_HOST: {
+								uint32_t network_byte_order_host_ip = 0;
+								uint8_t *bytewise_ip = ((uint8_t *)&network_byte_order_host_ip);
+								bytewise_ip[0] = (uint8_t)ip24_31;
+								bytewise_ip[1] = (uint8_t)ip16_23;
+								bytewise_ip[2] = (uint8_t)ip8_15;
+								bytewise_ip[3] = (uint8_t)ip0_7;
+								// fprintf(stderr, "%d.%d.%d.%d -> %02x%02x%02x%02x",
+								// 	ip24_31, ip16_23, ip8_15, ip0_7,
+								// 	bytewise_ip[0], bytewise_ip[1], bytewise_ip[2], bytewise_ip[3]);
+								// fflush(stderr);
 
+								game_state->ipv4_host_address = network_byte_order_host_ip;
+
+
+							} break;
 							case MENU_ACTION_FULLSCREEN_TOGGLE:
 								item->action(1, NULL);
 								break;
+							default:
+								item->action(0, NULL);
 						}
 					}
 					break;
