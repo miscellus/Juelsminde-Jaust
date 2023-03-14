@@ -423,7 +423,7 @@ void set_window_to_monitor_dimensions(void) {
 	int monitor_index = GetCurrentMonitor();
 	int monitor_width = GetMonitorWidth(monitor_index);
 	int monitor_height = GetMonitorHeight(monitor_index);
-	fprintf(stderr, "Monitor (%d): %d x %d\n", monitor_index, monitor_width, monitor_height);
+	// fprintf(stderr, "Monitor (%d): %d x %d\n", monitor_index, monitor_width, monitor_height);
 	SetWindowSize(monitor_width, monitor_height);
 }
 
@@ -887,7 +887,7 @@ int main(void)
 		char *custom_sdl_gamepad_mappings;
 		size_t contents_length;
 		read_file_into_c_string("resources/gamecontrollerdb.txt", &custom_sdl_gamepad_mappings, &contents_length);
-		printf("%.*s\n", (int)contents_length, custom_sdl_gamepad_mappings);
+		// printf("%.*s\n", (int)contents_length, custom_sdl_gamepad_mappings);
 		// SetGamepadMappings("03000000c62400002a54000001010000,PowerA Xbox One Spectra Infinity,a:b0,b:b1,back:b6,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,leftshoulder:b4,leftstick:b9,lefttrigger:a2,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b10,righttrigger:a5,rightx:a3,righty:a4,start:b7,x:b2,y:b3,platform:Linux,");
 		// SetGamepadMappings("030000005e040000a002000000010000,Generic X-Box pad Piranha,a:b0,b:b1,back:b6,dpdown:h0.1,dpleft:h0.2,dpright:h0.8,dpup:h0.4,leftshoulder:b4,leftstick:b9,lefttrigger:a2,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b10,righttrigger:a5,rightx:a3,righty:a4,start:b7,x:b2,y:b3,platform:Linux,");
 
@@ -895,7 +895,8 @@ int main(void)
 		if (!success) {
 			const char *error_str = NULL;
 			int code = glfwGetError(&error_str);
-			printf("GLFW_ERROR (%d): %s\n", code, error_str);
+			fprintf(stderr, "GLFW_ERROR (%d): %s\n", code, error_str);
+			exit(-1);
 		}
 	}
 #endif
@@ -987,7 +988,7 @@ int main(void)
 			game_state->game_play_time += dt;
 
 			// Slow motion
-			if (game_state->slow_motion_t < 1.0f) {
+			if (false && game_state->slow_motion_t < 1.0f) {
 				game_state->slow_motion_t += game_params->slowdowns_per_second*dt;
 			
 				float t = game_state->slow_motion_t;
@@ -1587,7 +1588,7 @@ int main(void)
 				float t = player->death_animation_t;
 
 				Color ring_color = player->params.color;
-				ring_color.a = 32;
+				ring_color.a = 64;
 
 				float t1 = 1.0f - t;
 				float t2 = t;
