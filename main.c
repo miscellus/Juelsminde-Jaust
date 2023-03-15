@@ -1835,18 +1835,10 @@ static void game_draw(Game_State *game_state) {
 
 				pos.y += line_advance;
 			}
-
-
-
-
-
-
-
-			// DrawTextEx(default_font, menu_text, (Vector2){10.0f, 10.0f}, 30.0f, FONT_SPACING_FOR_SIZE*view.scale, BLACK);
 		}
 	}
 
-	// DrawFPS(view_width-100, 10);
+	DrawFPS(10, 10);
 
 #if 0
 	{
@@ -1990,31 +1982,24 @@ int main(void)
 	
 	// Main game loop
 	while (game_state->running && !WindowShouldClose()) {
-		float dt = game_state->time_scale * GetFrameTime();
 
-		bool window_resized = IsWindowResized();
+		if (IsWindowFocused()) {
 
-		if (window_resized) {
-			game_state->view = get_updated_view();
-		}
+			bool toggle_fullscreen = IsKeyPressed(KEY_ENTER) && (IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT));
+			bool window_resized = IsWindowResized();
 
-		virtual_input_update(input);
+			if (toggle_fullscreen) {
+				ToggleFullscreen();  // modifies window size when scaling!
+				window_resized = true;
+			}
 
-		// Update
-		//-----------------------------------------------------
+			if (window_resized) {
+				game_state->view = get_updated_view();
+				game_constrain_players_to_view(game_state);
+			}
 
-		bool toggle_fullscreen = IsKeyPressed(KEY_ENTER) && (IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT));
+			virtual_input_update(input);
 
-		if (toggle_fullscreen) {
-			ToggleFullscreen();  // modifies window size when scaling!
-		}
-
-
-		if (window_resized) {
-			game_constrain_players_to_view(game_state);
-		}
-
-		if (IsWindowFocused() && !toggle_fullscreen) {
 			// Menu button handling
 			//
 			if (is_game_over(game_state) && !game_state->show_menu && input->input_common.buttons[VIRTUAL_BUTTON_MENU].is_pressed) {
@@ -2040,14 +2025,18 @@ int main(void)
 				}
 			}
 
+			float dt = GetFrameTime();
+
 			if (!game_state->show_menu) {
+				dt *= game_state->time_scale;
 				game_update_gameplay(game_state, dt);
 			}
 			else {
 				game_update_menu(game_state, input, dt);
 			}
-		}
 
+		}
+		
 		game_draw(game_state);
 	}
 
