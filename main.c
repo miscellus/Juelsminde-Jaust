@@ -22,6 +22,8 @@
 
 #define UNUSED(var) ((void)(var))
 
+static const char *title = "Juelsminde Joust";
+
 typedef struct View {
 	float width;
 	float height;
@@ -190,6 +192,8 @@ typedef struct Game_State {
 	bool running;
 	bool show_menu;
 
+	View view;
+
 	Virtual_Input input;
 	Game_Parameters params;
 
@@ -214,6 +218,8 @@ typedef struct Game_State {
 	int color_blue;
 
 	uint32_t ipv4_host_address;
+
+	uint64_t random_state;
 } Game_State;
 
 static Game_Parameters game_params_for_new_game = {
@@ -278,7 +284,9 @@ float random_01(uint64_t *random_state) {
 }
 
 
-void spawn_bullet_ring_ex(Player *player, Game_Parameters *game_params, uint64_t *random_state, int count, float speed, float spin) {
+void spawn_bullet_ring_ex(Player *player, Game_State *game_state, int count, float speed, float spin) {
+	Game_Parameters *game_params = &game_state->params;
+
 	if (player->active_bullets + count > MAX_ACTIVE_BULLETS) {
 		count = MAX_ACTIVE_BULLETS - player->active_bullets;
 	}
@@ -291,7 +299,7 @@ void spawn_bullet_ring_ex(Player *player, Game_Parameters *game_params, uint64_t
 
 	float angle_quantum = 2.0f*PI / (float)count;
 
-	float angle = random_01(random_state)*2.0f*PI;
+	float angle = random_01(&game_state->random_state)*2.0f*PI;
 
 	for (int i = 0; i < count; ++i) {
 		Bullet *bullet = &player->bullets[player->active_bullets + i];
@@ -307,13 +315,13 @@ void spawn_bullet_ring_ex(Player *player, Game_Parameters *game_params, uint64_t
 	PlaySound(player->params.sound_pop);
 }
 
-void spawn_bullet_ring(Player *player, Game_Parameters *game_params, uint64_t *random_state) {
-
+void spawn_bullet_ring(Player *player, Game_State *game_state) {
+	Game_Parameters *game_params = &game_state->params;
 	float comeback_factor = calculate_player_comeback_factor(player, game_params);
 	int count = (int)((player->energy * (0.5f + 0.5f*comeback_factor)) / game_params->bullet_energy_cost_ring);
 	float speed = 50.0f + Vector2LengthSqr(player->velocity)/1565.0f;
 	float spin = 0.3f*player->angular_velocity;
-	spawn_bullet_ring_ex(player, game_params, random_state, count, speed, spin);
+	spawn_bullet_ring_ex(player, game_state, count, speed, spin);
 }
 
 void spawn_bullet_fan(Player *player, Game_Parameters *game_params, int count, float speed, float angle_span) {
@@ -383,7 +391,7 @@ static bool is_game_over(Game_State *game_state) {
 	return game_state->num_dead_players >= game_state->params.num_players - 1;
 }
 
-void reset_game(Game_State *game_state, View view) {
+void game_reset(Game_State *game_state, View view) {
 
 	// Init game parameters
 	game_state->params = game_params_for_new_game;
@@ -685,8 +693,11 @@ static void read_file_into_c_string(const char *filepath, char **contents_out, s
 extern int glfwUpdateGamepadMappings(const char *string);
 extern int glfwGetError(const char **description);
 
-int main(void)
-{
+
+
+static void game_init(Game_State *game_state) {
+	// Initialization
+	//---------------------------------------------------------
 #ifdef __APPLE__
 	{
 		CFBundleRef mainBundle = CFBundleGetMainBundle();
@@ -702,50 +713,20 @@ int main(void)
 	}
 #endif
 
-
-#if 0
-	{
-		int major, minor, rev;
-		glfwGetVersion(&major, &minor, &rev);
-
-		fprintf(stderr, "GLFW Version: %d.%d.%d\n", major, minor, rev);
-		exit(0);
-	}
-#endif
-
-	uint64_t random_state = time(0);
-
-	{
-		long t = time(NULL);
-		random_state ^= (t*13) ^ (t>>4);
-	}
-
-	// Initialization
-	//---------------------------------------------------------
-
 	InitAudioDevice();
 	assert(IsAudioDeviceReady());
-
-	const char *title = "Juelsminde Joust";
 
 	// Set configuration flags for window creation
 	SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
 
-
-
-	// InitWindow(2560, 1440, title);
 	InitWindow(1024, 768, title);
 	HideCursor();
 	ToggleFullscreen();
 
-    SetTargetFPS(60);
-
-	// NOTE(jakob): Zeroed memory as part of initialization
-	Game_State *game_state = calloc(1, sizeof(*game_state));
-	assert(game_state);
+	SetExitKey(0);
+	SetTargetFPS(60);
 
 	Virtual_Input *input = &game_state->input;
-
 	virtual_input_init(input);
 
 	// Init player parameters
@@ -796,18 +777,66 @@ int main(void)
 
 	game_state->time_scale = 1.0f;
 
+	uint64_t random_state = time(0);
+
+	{
+		long t = time(NULL);
+		random_state ^= (t*13) ^ (t>>4);
+	}
+	game_state->random_state = random_state;
+
+#if 1
+	{
+		char *custom_sdl_gamepad_mappings;
+		size_t contents_length;
+		read_file_into_c_string("resources/gamecontrollerdb.txt", &custom_sdl_gamepad_mappings, &contents_length);
+		// printf("%.*s\n", (int)contents_length, custom_sdl_gamepad_mappings);
+		// SetGamepadMappings("03000000c62400002a54000001010000,PowerA Xbox One Spectra Infinity,a:b0,b:b1,back:b6,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,leftshoulder:b4,leftstick:b9,lefttrigger:a2,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b10,righttrigger:a5,rightx:a3,righty:a4,start:b7,x:b2,y:b3,platform:Linux,");
+		// SetGamepadMappings("030000005e040000a002000000010000,Generic X-Box pad Piranha,a:b0,b:b1,back:b6,dpdown:h0.1,dpleft:h0.2,dpright:h0.8,dpup:h0.4,leftshoulder:b4,leftstick:b9,lefttrigger:a2,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b10,righttrigger:a5,rightx:a3,righty:a4,start:b7,x:b2,y:b3,platform:Linux,");
+
+		int success = glfwUpdateGamepadMappings(custom_sdl_gamepad_mappings);
+		if (!success) {
+			const char *error_str = NULL;
+			int code = glfwGetError(&error_str);
+			fprintf(stderr, "GLFW_ERROR (%d): %s\n", code, error_str);
+			exit(-1);
+		}
+	}
+#endif
+
+	game_state->view = get_updated_view();
+	game_state->show_menu = false;
+	game_state->running = true;
+
+	game_reset(game_state, game_state->view);
+}
+
+#define MENU_DEF(MMM, ...) \
+	MMM.items = (Menu_Item []){__VA_ARGS__}; \
+	MMM.item_count = sizeof((Menu_Item []){__VA_ARGS__})/sizeof(Menu_Item);
+
+int main(void)
+{
+	// NOTE(jakob): Zeroed memory as part of initialization
+	Game_State *game_state = calloc(1, sizeof(*game_state));
+	assert(game_state);
+
+	game_init(game_state);
+	Font default_font = GetFontDefault();
+
+	Virtual_Input *input = &game_state->input;
+
 	Menu main_menu = {0};
 	Menu network_game_menu = {0};
 	Menu settings_menu = {0};
 
-	main_menu.item_count = 5;
-	main_menu.items = (Menu_Item []) {
+	MENU_DEF(main_menu, 
 		{MENU_ITEM_ACTION, "Continue", .u.int_value=MENU_ACTION_CONTINUE},
 		{MENU_ITEM_ACTION, "New Game", .u.int_value=MENU_ACTION_NEW_GAME},
 		{MENU_ITEM_MENU, "New Network Game", .u.menu_ref = &network_game_menu},
 		{MENU_ITEM_MENU, "Settings", .u.menu_ref = &settings_menu},
 		{MENU_ITEM_ACTION, "Quit", .u.int_value=MENU_ACTION_QUIT},
-	};
+	);
 
 	Menu gameplay_settings_menu = {0};
 	Menu video_settings_menu = {0};
@@ -815,8 +844,7 @@ int main(void)
 
 	int ip24_31 = 192, ip16_23 = 168, ip8_15 = 0, ip0_7 = 0;
 
-	network_game_menu.item_count = 6;
-	network_game_menu.items = (Menu_Item []){
+	MENU_DEF(network_game_menu,
 		{MENU_ITEM_MENU_BACK, "Back", .u = {0}},
 		{MENU_ITEM_INT_RANGE, "Host IP[24-31]", .u.range.int_range = {
 			.value = &ip24_31,
@@ -839,27 +867,24 @@ int main(void)
 			.max = 255,
 		}},
 		{MENU_ITEM_ACTION, "Connect to Host", .u.int_value=MENU_ACTION_CONNECT_TO_HOST},
-	};
+	);
 
-	settings_menu.item_count = 4;
-	settings_menu.items = (Menu_Item []){
+	MENU_DEF(settings_menu,
 		{MENU_ITEM_MENU_BACK, "Back", .u = {0}},
 		{MENU_ITEM_MENU, "Gameplay Settings", .u.menu_ref = &gameplay_settings_menu},
 		{MENU_ITEM_MENU, "Video Settings", .u.menu_ref = &video_settings_menu},
 		{MENU_ITEM_MENU, "Controls", .u.menu_ref = &controls_menu},
-	};
+	);
 
-	controls_menu.item_count = 5;
-	controls_menu.items = (Menu_Item []){
+	MENU_DEF(controls_menu,
 		{MENU_ITEM_MENU_BACK, "Back", .u = {0}},
 		{MENU_ITEM_BOOL, "Use Gamepad for Orange Player", .u.bool_ref = &game_state->players[0].params.input_device->use_gamepad},
 		{MENU_ITEM_BOOL, "Use Gamepad for Blue Player", .u.bool_ref = &game_state->players[1].params.input_device->use_gamepad},
 		{MENU_ITEM_BOOL, "Use Gamepad for Green Player", .u.bool_ref = &game_state->players[2].params.input_device->use_gamepad},
 		{MENU_ITEM_BOOL, "Use Gamepad for Purple Player", .u.bool_ref = &game_state->players[3].params.input_device->use_gamepad},
-	};
+	);
 
-	gameplay_settings_menu.item_count = 4;
-	gameplay_settings_menu.items = (Menu_Item []){
+	MENU_DEF(gameplay_settings_menu,
 		{MENU_ITEM_MENU_BACK, "Back", .u = {0}},
 		{MENU_ITEM_INT_RANGE, "Number of Players", .u.range.int_range = {
 			.value = &game_params_for_new_game.num_players,
@@ -872,10 +897,9 @@ int main(void)
 			.max = 999,
 		}},
 		{MENU_ITEM_FLOAT, "Time Scale", .u.float_ref = &game_state->time_scale},
-	};
+	);
 
-	video_settings_menu.item_count = 5;
-	video_settings_menu.items = (Menu_Item []){
+	MENU_DEF(video_settings_menu,
 		{MENU_ITEM_MENU_BACK, "Back", .u = {0}},
 		{MENU_ITEM_INT_RANGE, "Background (Red)", .u.range.int_range = {
 			.value = &game_state->color_red,
@@ -893,56 +917,21 @@ int main(void)
 			.max = 255,
 		}},
 		{MENU_ITEM_ACTION, "Full Screen", .action = menu_action_toggle_fullscreen, .u.int_value = MENU_ACTION_FULLSCREEN_TOGGLE},
-	};
+	);
 
 	Menu *menu = &main_menu;
 	float menu_item_cooldown = 0.0f;
-	float menu_action_time_start = 0.0f;
-
-	View view = get_updated_view();
-
-	reset_game(game_state, view);
-	game_state->show_menu = false;
-
-	Font default_font = GetFontDefault();
-
-	SetExitKey(0);
-
-	SetTargetFPS(60);               // Set our game to run at 60 frames-per-second
-	//----------------------------------------------------------
-
-
-#if 1
-	{
-		char *custom_sdl_gamepad_mappings;
-		size_t contents_length;
-		read_file_into_c_string("resources/gamecontrollerdb.txt", &custom_sdl_gamepad_mappings, &contents_length);
-		// printf("%.*s\n", (int)contents_length, custom_sdl_gamepad_mappings);
-		// SetGamepadMappings("03000000c62400002a54000001010000,PowerA Xbox One Spectra Infinity,a:b0,b:b1,back:b6,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,leftshoulder:b4,leftstick:b9,lefttrigger:a2,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b10,righttrigger:a5,rightx:a3,righty:a4,start:b7,x:b2,y:b3,platform:Linux,");
-		// SetGamepadMappings("030000005e040000a002000000010000,Generic X-Box pad Piranha,a:b0,b:b1,back:b6,dpdown:h0.1,dpleft:h0.2,dpright:h0.8,dpup:h0.4,leftshoulder:b4,leftstick:b9,lefttrigger:a2,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b10,righttrigger:a5,rightx:a3,righty:a4,start:b7,x:b2,y:b3,platform:Linux,");
-
-		int success = glfwUpdateGamepadMappings(custom_sdl_gamepad_mappings);
-		if (!success) {
-			const char *error_str = NULL;
-			int code = glfwGetError(&error_str);
-			fprintf(stderr, "GLFW_ERROR (%d): %s\n", code, error_str);
-			exit(-1);
-		}
-	}
-#endif
-
-	game_state->running = true;
-
+	
 	Game_Parameters *game_params = &game_state->params;
 
 	// Main game loop
-	while (game_state->running) {   // Detect window close button or ESC key
+	while (game_state->running) {
 		float dt = game_state->time_scale * GetFrameTime();
 
 		bool window_resized = IsWindowResized();
 
 		if (window_resized) {
-			view = get_updated_view();
+			game_state->view = get_updated_view();
 		}
 
 		virtual_input_update(input);
@@ -957,7 +946,7 @@ int main(void)
 		}
 
 		if (is_game_over(game_state) && !game_state->show_menu && input->input_common.buttons[VIRTUAL_BUTTON_MENU].is_pressed) {
-			reset_game(game_state, view);
+			game_reset(game_state, game_state->view);
 			input->input_common.buttons[VIRTUAL_BUTTON_MENU].is_pressed = false;
 		}
 		else if (input->input_common.buttons[VIRTUAL_BUTTON_MENU].is_pressed) {
@@ -988,6 +977,8 @@ int main(void)
 				if (player->health <= 0) continue;
 
 				float radius = calculate_player_radius(player, game_params);
+
+				View view = game_state->view;
 
 				Rectangle view_rectangle = {0, 0, view.width, view.height};
 
@@ -1127,6 +1118,14 @@ int main(void)
 				player->velocity = Vector2Add(player->velocity, acceleration);
 			}
 
+			for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
+				Player *player = &game_state->players[player_index];
+
+				if (player->health == 0 && player->death_animation_t < 1.0f) {
+					player->death_animation_t += dt;
+				}
+			}
+
 			// Player collision detection and response
 			//
 			for (int collision_iteration = 0; collision_iteration < 8; ++collision_iteration) {
@@ -1197,11 +1196,11 @@ int main(void)
 							);
 
 							if (hit_is_hard_enough(normal_response_1)) {
-								spawn_bullet_ring(player1, game_params, &random_state);
+								spawn_bullet_ring(player1, game_state);
 							}
 
 							if (hit_is_hard_enough(normal_response_2)) {
-								spawn_bullet_ring(player2, game_params, &random_state);
+								spawn_bullet_ring(player2, game_state);
 							}
 						}
 					}
@@ -1231,6 +1230,8 @@ int main(void)
 					float edge_offset;
 
 					float cumulative_edge_bounce = 0.0f;
+
+					View view = game_state->view;
 
 					if (player->velocity.x > 0) {
 						edge_offset = view.width - (target_position.x + player_radius);
@@ -1281,7 +1282,7 @@ int main(void)
 					}
 
 					if (hit_is_hard_enough(cumulative_edge_bounce)) {
-						spawn_bullet_ring(player, game_params, &random_state);
+						spawn_bullet_ring(player, game_state);
 					}
 				}
 
@@ -1300,6 +1301,8 @@ int main(void)
 					game_state->title_alpha -= Vector2Length(player->velocity)*0.0001f;
 				}
 			}
+
+			View view = game_state->view;
 
 			// Update bullets
 			for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
@@ -1366,8 +1369,7 @@ int main(void)
 
 								spawn_bullet_ring_ex(
 									opponent,
-									game_params,
-									&random_state,
+									game_state,
 									bullet_speed,
 									200.0f + 10.0f*opponent->energy,
 									bullet_speed * 0.025f
@@ -1527,7 +1529,7 @@ int main(void)
 								break;
 							case MENU_ACTION_NEW_GAME:
 								game_state->show_menu = false;
-								reset_game(game_state, view);
+								game_reset(game_state, game_state->view);
 								break;
 							case MENU_ACTION_QUIT:
 								game_state->running = false;
@@ -1575,7 +1577,6 @@ int main(void)
 			}
 		}
 
-
 		//
 		//-----------------------------------------------------
 		// Draw
@@ -1586,6 +1587,7 @@ int main(void)
 
 		ClearBackground((Color){game_state->color_red, game_state->color_green, game_state->color_blue, 255});
 
+		View view = game_state->view;
 		Vector2 screen = (Vector2){view.screen_width, view.screen_height};
 
 		#define SCREEN_TEXT_POS(u, v) Vector2Add((Vector2){screen.x*(u),screen.y*(v)}, Vector2Scale(text_bounds, -0.5f))
@@ -1648,8 +1650,6 @@ int main(void)
 				Vector2 pos = Vector2Scale(player->position, view.scale);
 
 				DrawRing(pos, inner_radius, outer_radius, 0, 360, 60, ring_color);
-
-				player->death_animation_t += dt;
 			}
 		}
 
