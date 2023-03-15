@@ -789,9 +789,9 @@ static void game_init(Game_State *game_state) {
 
 	game_state->time_scale = 1.0f;
 
-	uint64_t random_state = time(0);
+	uint64_t random_state = 0;//time(0);
 
-	{
+	if (0) {
 		long t = time(NULL);
 		random_state ^= (t*13) ^ (t>>4);
 	}
@@ -830,6 +830,7 @@ static void game_update(Game_State *game_state, float dt) {
 	dt *= game_state->time_scale;
 	game_state->game_play_time += dt;
 
+#if 0
 	// Slow motion
 	if (false && game_state->slow_motion_t < 1.0f) {
 		game_state->slow_motion_t += game_params->slowdowns_per_second*dt;
@@ -861,12 +862,29 @@ static void game_update(Game_State *game_state, float dt) {
 		// Apply slow motion
 		dt *= slow_motion_factor;
 	}
+#endif
 
 	for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
 		Player *player = &game_state->players[player_index];
 
-		if (player->health == 0 && player->death_animation_t < 1.0f) {
-			player->death_animation_t += dt;
+		// Update death animation
+		if (player->health == 0) {
+			if (player->death_animation_t < 1.0f) {
+				player->death_animation_t += dt;
+			}
+			continue;
+		}
+
+
+		// Update hit animation
+		if (player->hit_animation_t < 1.0f) {
+			player->hit_animation_t += 4.0f*dt;
+		}
+
+		// Update title fade animation
+		if (game_state->title_alpha > 0) {
+			float distance = dt * Vector2Length(player->velocity);
+			game_state->title_alpha -= distance*0.01f;
 		}
 	}
 
@@ -961,13 +979,19 @@ static void game_update_fixed(Game_State *game_state) {
 
 				spawn_bullet_fan(player, game_params, bullet_count, speed, angle_span);
 
-				acceleration = Vector2Subtract(acceleration, Vector2Scale(shoot_vector, speed*recoil_factor));
+				acceleration = Vector2Add(acceleration, Vector2Scale(shoot_vector, -speed*recoil_factor));
 
 				player->shoot_charge_t = 0.0f;
 			}
 		}
 
 		player->velocity = Vector2Add(player->velocity, acceleration);
+
+		// Update player energy
+		float distance = dt * Vector2Length(player->velocity);
+
+		float comeback_energy = calculate_player_comeback_factor(player, game_params);
+		player->energy += (distance * (1 + comeback_energy)) / (player->energy*2.0f + 1.0f);
 	}
 
 	// Player collision detection and response
@@ -1017,11 +1041,11 @@ static void game_update_fixed(Game_State *game_state) {
 					Vector2 normal = Vector2Scale(position_difference, inv_distance);
 					Vector2 tangent = (Vector2){normal.y, -normal.x};
 
-					float normal_response_1 = Vector2DotProduct(normal, player1->velocity);
-					float normal_response_2 = Vector2DotProduct(normal, player2->velocity);
+					float normal_response_1 = 100.0f * dt * Vector2DotProduct(normal, player1->velocity);
+					float normal_response_2 = 100.0f * dt * Vector2DotProduct(normal, player2->velocity);
 
-					float tangental_response_1 = Vector2DotProduct(tangent, player1->velocity);
-					float tangental_response_2 = Vector2DotProduct(tangent, player2->velocity);
+					float tangental_response_1 = 100.0f * dt * Vector2DotProduct(tangent, player1->velocity);
+					float tangental_response_2 = 100.0f * dt * Vector2DotProduct(tangent, player2->velocity);
 
 					float mass_1 = calculate_player_radius(player1, game_params);
 					float mass_2 = calculate_player_radius(player2, game_params);
@@ -1128,21 +1152,8 @@ static void game_update_fixed(Game_State *game_state) {
 			if (hit_is_hard_enough(cumulative_edge_bounce)) {
 				spawn_bullet_ring(player, game_state);
 			}
-		}
-
-		player->position = target_position;
-
-		float speed = Vector2Length(player->velocity);
-
-		float comeback_energy = calculate_player_comeback_factor(player, game_params);
-		player->energy += dt * (speed * (1 + comeback_energy)) / (player->energy*2.0f + 1.0f);
-
-		if (player->hit_animation_t < 1.0f) {
-			player->hit_animation_t += dt*4.0f;
-		}
-
-		if (game_state->title_alpha > 0) {
-			game_state->title_alpha -= Vector2Length(player->velocity)*0.0001f;
+			
+			player->position = target_position;
 		}
 	}
 
@@ -2051,16 +2062,20 @@ int main(void)
 
 
 			float dt = GetFrameTime();
-			game_state->time_step_accumulator += dt;
-			int num_fixed_time_steps = (int)(game_state->time_step_accumulator / TIME_STEP_FIXED);
-			game_state->time_step_accumulator -= num_fixed_time_steps*TIME_STEP_FIXED;
-			game_state->time_step_t = game_state->time_step_accumulator / TIME_STEP_FIXED;
 
 			if (!game_state->show_menu) {
+				dt *= game_state->time_scale;
+
+				game_update(game_state, dt);
+
+				game_state->time_step_accumulator += dt;
+				int num_fixed_time_steps = (int)(game_state->time_step_accumulator / TIME_STEP_FIXED);
+				game_state->time_step_accumulator -= num_fixed_time_steps*TIME_STEP_FIXED;
+				game_state->time_step_t = game_state->time_step_accumulator / TIME_STEP_FIXED;
+
 				for (int i = 0; i < num_fixed_time_steps; ++i) {
 					game_update_fixed(game_state);
 				}
-				game_update(game_state, dt);
 			}
 			else {
 				game_update_menu(game_state, dt);
