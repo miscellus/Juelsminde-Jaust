@@ -24,6 +24,8 @@
 
 static const char *title = "Juelsminde Joust";
 
+#define TIME_STEP_FIXED 0.01f
+
 typedef struct View {
 	float width;
 	float height;
@@ -204,6 +206,8 @@ typedef struct Game_State {
 	float time_scale;
 	bool game_in_progress; // TODO(jakob): Do we need this?
 	float game_play_time;
+	float time_step_accumulator;
+	float time_step_t;
 	float slow_motion_t;
 
 #define MAX_ACTIVE_PLAYERS 4
@@ -547,6 +551,11 @@ float _lerp_angle(float a, float b, float t) {
 	return result;
 }
 
+static Vector2 interpolate_movement(Vector2 position, Vector2 velocity, float step_t) {
+	Vector2 result = Vector2Add(position, Vector2Scale(velocity, step_t * TIME_STEP_FIXED));
+	return result;
+}
+
 static const Virtual_Input_Key_Map global_key_maps[] = {
 	{
 		KEY_LEFT,
@@ -814,10 +823,11 @@ static void game_init(Game_State *game_state) {
 	game_reset(game_state, game_state->view);
 }
 
-static void game_update_gameplay(Game_State *game_state, float dt) {
+static void game_update(Game_State *game_state, float dt) {
 
 	Game_Parameters *game_params = &game_state->params;
-
+	
+	dt *= game_state->time_scale;
 	game_state->game_play_time += dt;
 
 	// Slow motion
@@ -852,7 +862,37 @@ static void game_update_gameplay(Game_State *game_state, float dt) {
 		dt *= slow_motion_factor;
 	}
 
-	// Update player input and velocity
+	for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
+		Player *player = &game_state->players[player_index];
+
+		if (player->health == 0 && player->death_animation_t < 1.0f) {
+			player->death_animation_t += dt;
+		}
+	}
+
+	// Update Rings
+	for (int ring_index = 0; ring_index < game_state->active_rings; ) {
+
+		Ring *ring = &game_state->rings[ring_index];
+
+		ring->t += dt * 2.5f;
+
+		if (ring->t > 1.0f) {
+			game_state->rings[ring_index] = game_state->rings[--game_state->active_rings];
+		}
+		else {
+			++ring_index;
+		}
+	}
+
+}
+
+static void game_update_fixed(Game_State *game_state) {
+
+	const float dt = TIME_STEP_FIXED;
+	Game_Parameters *game_params = &game_state->params;
+
+	// Update player motion
 	for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
 
 		Player *player = &game_state->players[player_index];
@@ -928,14 +968,6 @@ static void game_update_gameplay(Game_State *game_state, float dt) {
 		}
 
 		player->velocity = Vector2Add(player->velocity, acceleration);
-	}
-
-	for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
-		Player *player = &game_state->players[player_index];
-
-		if (player->health == 0 && player->death_animation_t < 1.0f) {
-			player->death_animation_t += dt;
-		}
 	}
 
 	// Player collision detection and response
@@ -1222,27 +1254,13 @@ static void game_update_gameplay(Game_State *game_state, float dt) {
 			}
 		}
 	}
-
-	// Update Rings
-	for (int ring_index = 0; ring_index < game_state->active_rings; ) {
-
-		Ring *ring = &game_state->rings[ring_index];
-
-		ring->t += dt * 2.5f;
-
-		if (ring->t > 1.0f) {
-			game_state->rings[ring_index] = game_state->rings[--game_state->active_rings];
-		}
-		else {
-			++ring_index;
-		}
-	}
-
 }
 
 
-static void game_update_menu(Game_State *game_state, Virtual_Input *input, float dt) {
+static void game_update_menu(Game_State *game_state, float dt) {
 	UNUSED(dt);
+
+	Virtual_Input *input = &game_state->input;
 
 	int item_change_y = (int)input->input_common.direction.y;
 	int item_change_x = (int)input->input_common.direction.x;
@@ -1417,6 +1435,8 @@ static void game_constrain_players_to_view(Game_State *game_state) {
 
 static void game_draw(Game_State *game_state) {
 
+	float step_t = game_state->time_step_t;
+
 	Game_Parameters *game_params = &game_state->params;
 	Font default_font = GetFontDefault();
 
@@ -1505,9 +1525,11 @@ static void game_draw(Game_State *game_state) {
 
 			float s = bullet->time < 0.3f ? bullet->time/0.3f : 1.0f;
 
+			Vector2 bullet_pos = interpolate_movement(bullet->position, bullet->velocity, step_t);
+
 			Vector2 direction = Vector2Scale(bullet->velocity, -0.2f*s);
-			Vector2 point_tail = Vector2Add(bullet->position, direction);
-			Vector2 tail_to_position_difference = Vector2Subtract(bullet->position, point_tail);
+			Vector2 point_tail = Vector2Add(bullet_pos, direction);
+			Vector2 tail_to_position_difference = Vector2Subtract(bullet_pos, point_tail);
 
 			float mid_circle_radius = 0.5f*Vector2Length(tail_to_position_difference);
 
@@ -1524,7 +1546,7 @@ static void game_draw(Game_State *game_state) {
 			Circle mid_circle = {mid_point, mid_circle_radius};
 
 			float bullet_radius = game_params->bullet_radius;
-			Circle bullet_circle = {bullet->position, bullet_radius*t};
+			Circle bullet_circle = {bullet_pos, bullet_radius*t};
 
 			Intersection_Points result = intersection_points_from_two_circles(bullet_circle, mid_circle);
 
@@ -1537,7 +1559,7 @@ static void game_draw(Game_State *game_state) {
 				DrawTriangle(Vector2Scale(point_tail, view.scale), Vector2Scale(result.intersection_points[0], view.scale), Vector2Scale(result.intersection_points[1], view.scale), tail_color);
 			}
 
-			Vector2 bullet_screen_position = Vector2Scale(bullet->position, view.scale);
+			Vector2 bullet_screen_position = Vector2Scale(bullet_pos, view.scale);
 			DrawCircleV(bullet_screen_position, bullet_radius*bullet_scale, parameters->color);
 
 		}
@@ -1558,9 +1580,9 @@ static void game_draw(Game_State *game_state) {
 		float font_size = player_radius_screen*1.0f;
 		float font_spacing = font_size*FONT_SPACING_FOR_SIZE;
 
-		Vector2 player_position_screen = Vector2Scale(player->position, view.scale);
-		// printf("Player(%d) Pos: {%.2f,%.2f}\n", player_index, player_position_screen.x, player_position_screen.y);
-
+		Vector2 player_position_screen = interpolate_movement(player->position, player->velocity, step_t);
+		player_position_screen = Vector2Scale(player_position_screen, view.scale);
+		
 		// Draw player's body
 		DrawCircleV(player_position_screen, player_radius_screen, parameters->color);
 
@@ -1838,7 +1860,9 @@ static void game_draw(Game_State *game_state) {
 		}
 	}
 
+#ifndef NDEBUG
 	DrawFPS(10, 10);
+#endif
 
 #if 0
 	{
@@ -1883,7 +1907,6 @@ int main(void)
 
 	game_init(game_state);
 
-	Virtual_Input *input = &game_state->input;
 
 	Menu main_menu = {0};
 	Menu network_game_menu = {0};
@@ -1978,6 +2001,7 @@ int main(void)
 		{MENU_ITEM_ACTION, "Full Screen", .action = menu_action_toggle_fullscreen, .u.int_value = MENU_ACTION_FULLSCREEN_TOGGLE},
 	);
 
+	Virtual_Input *input = &game_state->input;
 	game_state->menu = &main_menu;
 	
 	// Main game loop
@@ -2025,18 +2049,27 @@ int main(void)
 				}
 			}
 
+
 			float dt = GetFrameTime();
+			game_state->time_step_accumulator += dt;
+			int num_fixed_time_steps = (int)(game_state->time_step_accumulator / TIME_STEP_FIXED);
+			game_state->time_step_accumulator -= num_fixed_time_steps*TIME_STEP_FIXED;
+			game_state->time_step_t = game_state->time_step_accumulator / TIME_STEP_FIXED;
 
 			if (!game_state->show_menu) {
-				dt *= game_state->time_scale;
-				game_update_gameplay(game_state, dt);
+				for (int i = 0; i < num_fixed_time_steps; ++i) {
+					game_update_fixed(game_state);
+				}
+				game_update(game_state, dt);
 			}
 			else {
-				game_update_menu(game_state, input, dt);
+				game_update_menu(game_state, dt);
 			}
 
 		}
 		
+		// printf("Time step interp: %.2f\n", game_state->time_step_t);
+		// fflush(stdout);
 		game_draw(game_state);
 	}
 
