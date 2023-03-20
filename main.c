@@ -204,10 +204,8 @@ typedef struct Game_State {
 	
 	float title_alpha;
 	float time_scale;
-	bool game_in_progress; // TODO(jakob): Do we need this?
 	float game_play_time;
 	float time_step_accumulator;
-	float time_step_t;
 	float slow_motion_t;
 
 #define MAX_ACTIVE_PLAYERS 4
@@ -223,6 +221,8 @@ typedef struct Game_State {
 	uint32_t ipv4_host_address;
 
 	uint64_t random_state;
+
+	uint32_t step_count; // NOTE(jakob): The number of fixed update steps that have happened sicnce the biginning of the current match
 
 	bool show_menu;
 	float menu_item_cooldown;
@@ -410,7 +410,7 @@ void game_reset(Game_State *game_state, View view) {
 	game_state->title_alpha = 1.0f;
 	game_state->active_rings = 0;
 	game_state->game_play_time = 0.0f;
-	game_state->game_in_progress = true;
+	game_state->step_count = 0;
 
 	Game_Parameters *game_params = &game_state->params;
 
@@ -909,6 +909,8 @@ static void game_update_fixed(Game_State *game_state) {
 
 	const float dt = TIME_STEP_FIXED;
 	Game_Parameters *game_params = &game_state->params;
+
+	++game_state->step_count;
 
 	// Update player motion
 	for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
@@ -1446,7 +1448,7 @@ static void game_constrain_players_to_view(Game_State *game_state) {
 
 static void game_draw(Game_State *game_state) {
 
-	float step_t = game_state->time_step_t;
+	float step_t = game_state->time_step_accumulator / TIME_STEP_FIXED;
 
 	Game_Parameters *game_params = &game_state->params;
 	Font default_font = GetFontDefault();
@@ -1873,6 +1875,12 @@ static void game_draw(Game_State *game_state) {
 
 #ifndef NDEBUG
 	DrawFPS(10, 10);
+	{
+		char buffer[512];
+		
+		snprintf(buffer, sizeof(buffer), "Step count: %u", game_state->step_count);
+		DrawText(buffer, 10, 40, 20, BLACK);
+	}
 #endif
 
 #if 0
@@ -2071,7 +2079,6 @@ int main(void)
 				game_state->time_step_accumulator += dt;
 				int num_fixed_time_steps = (int)(game_state->time_step_accumulator / TIME_STEP_FIXED);
 				game_state->time_step_accumulator -= num_fixed_time_steps*TIME_STEP_FIXED;
-				game_state->time_step_t = game_state->time_step_accumulator / TIME_STEP_FIXED;
 
 				for (int i = 0; i < num_fixed_time_steps; ++i) {
 					game_update_fixed(game_state);
