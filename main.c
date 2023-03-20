@@ -1,3 +1,17 @@
+/*
+
+
+- Networking
+	- NOTE(jakob): Networking will be implemented in Juelsminde Joust using a client-server architecture.
+		- One player will be the host of the game and act as the server, the remaining players will act as clients.
+		- Synchronization between players will use snapshot interpolation with a send rate of 30 hz and a 150ms playback buffer.
+	- TODO(jakob): Create networking abstraction layer
+	- Figure out what data need to be sent
+
+- Different game modes
+
+*/
+
 #include <assert.h>
 #include <string.h>
 #include <stdlib.h>
