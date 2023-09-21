@@ -274,12 +274,9 @@ float calculate_player_comeback_factor(Player *player, Game_Parameters *game_par
 	return result;
 }
 
-
 bool hit_is_hard_enough(float hit) {
-
 	return 200.0f <= fabs(hit);
 }
-
 
 uint64_t xorshift64(uint64_t *state)
 {
@@ -380,18 +377,14 @@ void spawn_bullet_fan(Player *player, Game_Parameters *game_params, int count, f
 
 
 void spawn_ring(Game_State *game_state, Vector2 position, int player_index, float ring_angle) {
-
 	if (game_state->active_rings < MAX_ACTIVE_RINGS) {
-
 		game_state->rings[game_state->active_rings++] = (Ring){
 			.position = position,
 			.player_index = player_index,
 			.t = 0.0f,
 			.angle = ring_angle,
 		};
-
 	}
-
 }
 
 bool position_outside_playzone(Vector2 position, View view) {
@@ -1037,7 +1030,6 @@ static void game_update_fixed(Game_State *game_state) {
 
 				if (distance <= radii_sum) {
 
-
 					// Static collision
 					float half_overlap = 0.5f*(distance - radii_sum);
 
@@ -1469,7 +1461,9 @@ static void game_draw(Game_State *game_state) {
 
 	BeginDrawing();
 
-	ClearBackground((Color){game_state->color_red, game_state->color_green, game_state->color_blue, 255});
+	Color background_color = (Color){game_state->color_red, game_state->color_green, game_state->color_blue, 255};
+
+	ClearBackground(background_color);
 
 	View view = game_state->view;
 	Vector2 screen = (Vector2){view.screen_width, view.screen_height};
@@ -1774,7 +1768,7 @@ static void game_draw(Game_State *game_state) {
 
 		assert(triumphant_player < game_params->num_players);
 
-		Color screen_overlay_color = (Color){255.0f, 255.0f, 255.0f, 192.0f};
+		Color screen_overlay_color = Fade(background_color, 0.8);
 
 		DrawRectangle(0, 0, screen.x, screen.y, screen_overlay_color);
 
