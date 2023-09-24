@@ -1,5 +1,6 @@
 /*
-
+- [ ] Cleanup and refactor main.c
+- [ ] Fix collision/hit force calculation to be framerate independent
 
 - Networking
 	- NOTE(jakob): Networking will be implemented in Juelsminde Joust using a client-server architecture.
@@ -26,6 +27,7 @@
 #endif
 
 // Unity-build
+#include "ui.h"
 #include "jj_math.c"
 
 #define FONT_SPACING_FOR_SIZE 0.12f
@@ -137,52 +139,6 @@ typedef struct Ring {
 	float angle;
 	float t;
 } Ring;
-
-enum Menu_Item_Type {
-	MENU_ITEM_LABEL = 0,
-	MENU_ITEM_ACTION,
-	MENU_ITEM_BOOL,
-	MENU_ITEM_INT,
-	MENU_ITEM_FLOAT,
-	MENU_ITEM_INT_RANGE,
-	MENU_ITEM_FLOAT_RANGE,
-	MENU_ITEM_MENU,
-	MENU_ITEM_MENU_BACK,
-};
-
-enum Menu_Action {
-	MENU_ACTION_NEW_GAME,
-	MENU_ACTION_CONTINUE,
-	MENU_ACTION_QUIT,
-	MENU_ACTION_CONNECT_TO_HOST,
-	MENU_ACTION_FULLSCREEN_TOGGLE,
-};
-
-typedef union Value_Range {
-	struct {int *value, min, max;} int_range;
-	struct {float *value, min, max;} float_range;
-} Value_Range;
-
-typedef struct Menu_Item {
-	enum Menu_Item_Type type;
-	const char *text;
-	union {
-		int *int_ref;
-		float *float_ref;
-		Value_Range range;
-		bool *bool_ref;
-		struct Menu *menu_ref;
-		int int_value;
-	} u;
-	int (* action)(int change, char *user_data);
-} Menu_Item;
-
-typedef struct Menu {
-	struct Menu *parent;
-	Menu_Item *items;
-	unsigned int item_count;
-	unsigned int selected_index;
-} Menu;
 
 typedef struct Game_Parameters {
 	int num_players;
@@ -458,8 +414,9 @@ View get_updated_view(void) {
 
 	if (IsWindowFullscreen()) {
 		int monitor = GetCurrentMonitor();
-		width = (float)GetMonitorWidth(monitor);
-		height = (float)GetMonitorHeight(monitor);
+		width = (float)GetScreenWidth();
+		height = (float)GetScreenHeight();
+		fprintf(stderr, "height: %f\n", height);
 	}
 	else {
 		width = GetScreenWidth();
@@ -738,9 +695,9 @@ static void game_init(Game_State *game_state) {
 	// Set configuration flags for window creation
 	SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
 
-	InitWindow(1024, 768, title);
+	InitWindow(1440, 900, title);
 	HideCursor();
-	ToggleFullscreen();
+	// ToggleFullscreen();
 
 	SetExitKey(0);
 	SetTargetFPS(60);
@@ -790,9 +747,9 @@ static void game_init(Game_State *game_state) {
 	}
 	game_state->sound_win = LoadSound("resources/win.wav");
 
-	game_state->color_red = 255;
-	game_state->color_green = 255;
-	game_state->color_blue = 255;
+	game_state->color_red = 240;
+	game_state->color_green = 220;
+	game_state->color_blue = 200;
 
 	game_state->time_scale = 1.0f;
 
@@ -839,7 +796,7 @@ static void game_update(Game_State *game_state, float dt) {
 
 #if 0
 	// Slow motion
-	if (false && game_state->slow_motion_t < 1.0f) {
+	if (game_state->slow_motion_t < 1.0f) {
 		game_state->slow_motion_t += game_params->slowdowns_per_second*dt;
 	
 		float t = game_state->slow_motion_t;
@@ -1049,8 +1006,8 @@ static void game_update_fixed(Game_State *game_state) {
 					Vector2 normal = Vector2Scale(position_difference, inv_distance);
 					Vector2 tangent = (Vector2){normal.y, -normal.x};
 
-					float normal_response_1 = 100.0f * dt * Vector2DotProduct(normal, player1->velocity);
-					float normal_response_2 = 100.0f * dt * Vector2DotProduct(normal, player2->velocity);
+					float normal_response_1 = /* 100.0f * dt * */ Vector2DotProduct(normal, player1->velocity);
+					float normal_response_2 = /* 100.0f * dt * */ Vector2DotProduct(normal, player2->velocity);
 
 					float tangental_response_1 = 100.0f * dt * Vector2DotProduct(tangent, player1->velocity);
 					float tangental_response_2 = 100.0f * dt * Vector2DotProduct(tangent, player2->velocity);
@@ -1922,10 +1879,6 @@ static void game_draw(Game_State *game_state) {
 	EndDrawing();
 }
 
-#define MENU_DEF(MMM, ...) \
-	MMM.items = (Menu_Item []){__VA_ARGS__}; \
-	MMM.item_count = sizeof((Menu_Item []){__VA_ARGS__})/sizeof(Menu_Item);
-
 int main(void)
 {
 	// NOTE(jakob): Zeroed memory as part of initialization
@@ -2037,14 +1990,14 @@ int main(void)
 		if (IsWindowFocused()) {
 
 			bool toggle_fullscreen = IsKeyPressed(KEY_ENTER) && (IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT));
-			bool window_resized = IsWindowResized();
+			bool window_resized = false;
 
 			if (toggle_fullscreen) {
 				ToggleFullscreen();  // modifies window size when scaling!
 				window_resized = true;
 			}
 
-			if (window_resized) {
+			if (IsWindowResized()) {
 				game_state->view = get_updated_view();
 				game_constrain_players_to_view(game_state);
 			}
