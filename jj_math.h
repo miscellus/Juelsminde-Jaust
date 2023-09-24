@@ -1,6 +1,8 @@
 #ifndef JJ_MATH_H
 #define JJ_MATH_H
 
+#include <raymath.h>
+
 #define INV_SQRT_TWO 0.7071067811865475f
 
 typedef struct Intersection_Points {
@@ -25,5 +27,7 @@ Vector2 Vector2Abs(Vector2 v);
 Vector2 Vector2NormalizeOrZero(Vector2 v);
 
 Intersection_Points intersection_points_from_two_circles(Circle c1, Circle c2);
+
+float angle_towards(Vector2 source, Vector2 target);
 
 #endif

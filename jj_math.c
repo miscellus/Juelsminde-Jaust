@@ -75,3 +75,9 @@ Intersection_Points intersection_points_from_two_circles(Circle c1, Circle c2) {
 
     return result;
 }
+
+float angle_towards(Vector2 source, Vector2 target) {
+    Vector2 diff = Vector2Subtract(target, source);
+    diff = Vector2NormalizeOrZero(diff);
+    return atan2f(diff.y, diff.x);
+}

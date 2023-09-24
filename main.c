@@ -1,5 +1,6 @@
 /*
 - [ ] Cleanup and refactor main.c
+	- [ ] Pull out ui stuff
 - [ ] Fix collision/hit force calculation to be framerate independent
 
 - Networking
@@ -28,6 +29,7 @@
 
 // Unity-build
 #include "ui.h"
+#include "jj_math.h"
 #include "jj_math.c"
 
 #define FONT_SPACING_FOR_SIZE 0.12f
@@ -361,6 +363,14 @@ static bool is_game_over(Game_State *game_state) {
 	return game_state->num_dead_players >= game_state->params.num_players - 1;
 }
 
+void player_init(Player *player, Game_Parameters *game_params, Vector2 position, float shoot_angle) {
+	memset(player, 0, (char *)&player->params - (char *)player);
+	player->position = position;
+	player->shoot_angle = shoot_angle;
+	player->health = game_params->starting_health;
+	player->hit_animation_t = 1.0f;
+}
+
 void game_reset(Game_State *game_state, View view) {
 
 	// Init game parameters
@@ -380,20 +390,13 @@ void game_reset(Game_State *game_state, View view) {
 	int column_count = game_params->num_players;
 	float column_width = view.width / (float)column_count;
 
+	Vector2 screen_center = (Vector2){0.5f*view.width, 0.5f*view.height};
+
 	for (int player_index = 0; player_index < game_params->num_players; ++player_index) {
 		Player *player = &game_state->players[player_index];
-
-		Vector2 screen_center = (Vector2){0.5f*view.width, 0.5f*view.height};
-
-		Vector2 aim_dir = Vector2Subtract(screen_center, player->position);
-		aim_dir = Vector2NormalizeOrZero(aim_dir);
-
-		memset(player, 0, (char *)&player->params - (char *)player);
-		player->position = (Vector2){ column_width*(player_index + 0.5f), view.height / 2.0f };
-		player->shoot_angle = atan2f(aim_dir.y, aim_dir.x);
-		player->health = game_params->starting_health;
-		player->hit_animation_t = 1.0f;
-
+		Vector2 position = (Vector2){ column_width*(player_index + 0.5f), view.height / 2.0f };
+		float shoot_angle = angle_towards(position, screen_center);
+		player_init(player, game_params, position, shoot_angle);
 	}
 }
 
