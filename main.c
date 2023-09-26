@@ -29,7 +29,6 @@
 
 // Unity-build
 #include "ui.h"
-#include "jj_math.h"
 #include "jj_math.c"
 
 #define FONT_SPACING_FOR_SIZE 0.12f
@@ -750,9 +749,9 @@ static void game_init(Game_State *game_state) {
 	}
 	game_state->sound_win = LoadSound("resources/win.wav");
 
-	game_state->color_red = 240;
-	game_state->color_green = 220;
-	game_state->color_blue = 200;
+	game_state->color_red = 255;
+	game_state->color_green = 255;
+	game_state->color_blue = 255;
 
 	game_state->time_scale = 1.0f;
 

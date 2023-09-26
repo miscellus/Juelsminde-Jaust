@@ -1,6 +1,4 @@
 #include "jj_math.h"
-#include <raymath.h>
-
 
 float sign_float(float v) {
     return v > 0 ? 1.0f : v < 0 ? -1.0f : 0.0f;
