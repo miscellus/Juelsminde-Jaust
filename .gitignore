@@ -2,10 +2,13 @@
 # Project specific
 #
 
+nob
+nob.old
 Juelsminde Joust
 Juelsminde Joust.app
 Juelsminde Joust.exe
 *.dSYM/
+*.prog
 lib/
 include/
 

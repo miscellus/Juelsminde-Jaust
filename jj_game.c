@@ -28,7 +28,7 @@
 #endif
 
 // Unity-build
-#include "ui.h"
+#include "jj_ui.h"
 #include "jj_math.c"
 
 #define FONT_SPACING_FOR_SIZE 0.12f
